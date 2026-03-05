@@ -306,50 +306,6 @@ abstract class Repository {
 '''
 
 
-CPP_SOURCE = '''
-#define MAX_BUFFER_SIZE 1024
-
-/* Manages user data and operations. */
-class UserService {
-public:
-    /* Create a new service instance. */
-    UserService(int capacity) : capacity_(capacity) {}
-
-    /* Get a user by their identifier. */
-    std::string getUser(int userId) const {
-        return "user-" + std::to_string(userId);
-    }
-
-private:
-    int capacity_;
-};
-
-/* A 2D coordinate point. */
-struct Point {
-    double x;
-    double y;
-};
-
-/* Status codes for operations. */
-enum Status {
-    STATUS_OK,
-    STATUS_ERROR,
-    STATUS_PENDING
-};
-
-/* Authenticate a token string. */
-int authenticate(const char *token) {
-    return token != nullptr;
-}
-
-// A template function for maximum.
-template <typename T>
-T maximum(T a, T b) {
-    return (a > b) ? a : b;
-}
-'''
-
-
 C_SOURCE = '''
 #define MAX_USERS 100
 
@@ -374,6 +330,120 @@ struct User *get_user(int id) {
 /* Authenticate a token string. */
 int authenticate(const char *token) {
     return token != NULL;
+}
+'''
+
+
+CPP_SOURCE = '''
+#define MAX_USERS 100
+
+namespace sample {
+
+using UserId = int;
+
+enum class Status {
+    STATUS_ACTIVE,
+    STATUS_DISABLED,
+};
+
+/* A generic value container. */
+template <typename T>
+class Box {
+public:
+    explicit Box(T value) : value_(value) {}
+    ~Box() = default;
+
+    T get() const {
+        return value_;
+    }
+
+    bool operator==(const Box& other) const {
+        return value_ == other.value_;
+    }
+
+private:
+    T value_;
+};
+
+/* Identity for generic values. */
+template <typename T>
+T identity(T value) {
+    return value;
+}
+
+/* Add two integers. */
+int add(int a, int b);
+int add(int a, int b) {
+    return a + b;
+}
+
+}  // namespace sample
+'''
+
+
+CPP_HEADER_SOURCE = '''
+namespace sample {
+class Widget {
+public:
+    Widget();
+    ~Widget();
+    int Get() const;
+};
+}
+'''
+
+
+C_ONLY_HEADER_SOURCE = '''
+int only_c(void) {
+    int values[] = (int[]){1, 2, 3};
+    return values[0];
+}
+'''
+
+
+CPP_EDGE_SOURCE = '''
+namespace outer {
+namespace inner {
+
+class Ops {
+public:
+    int operator[](int idx) const { return idx; }
+    int operator()(int x) const { return x; }
+    explicit operator bool() const { return true; }
+    int value = 0;
+};
+
+int (*make_callback(int seed))(int) {
+    return nullptr;
+}
+
+int consume_ref(int& v) { return v; }
+
+}  // namespace inner
+}  // namespace outer
+'''
+
+
+MIXED_HEADER_SOURCE = '''
+class MaybeCpp {
+public:
+    int get() const;
+};
+
+int only_c(void) {
+    int values[] = (int[]){1, 2, 3};
+    return values[0];
+}
+'''
+
+
+CXX_KEYWORDS_HEADER_SOURCE = '''
+constexpr int id(int x) noexcept {
+    return x;
+}
+
+[[nodiscard]] inline int succ(int x) {
+    return x + 1;
 }
 '''
 
@@ -649,47 +719,142 @@ def test_parse_cpp():
     """Test C++ parsing."""
     symbols = parse_file(CPP_SOURCE, "sample.cpp", "cpp")
 
-    # Class
-    cls = next((s for s in symbols if s.name == "UserService" and s.kind == "class"), None)
+    # Namespace-qualified class
+    cls = next((s for s in symbols if s.name == "Box" and s.kind == "class"), None)
     assert cls is not None
-    assert "Manages user data" in cls.docstring
+    assert cls.qualified_name == "sample.Box"
+    assert "generic value container" in cls.docstring.lower()
 
-    # Methods inside class
-    get_user = next((s for s in symbols if s.name == "getUser"), None)
-    assert get_user is not None
-    assert get_user.kind == "method"
-    assert get_user.qualified_name == "UserService.getUser"
-    assert "Get a user by their identifier" in get_user.docstring
-
-    # Constructor (method inside class)
-    ctor = next((s for s in symbols if s.name == "UserService" and s.kind == "method"), None)
+    # Constructor + destructor + method
+    ctor = next((s for s in symbols if s.name == "Box" and s.kind == "method"), None)
     assert ctor is not None
-    assert ctor.qualified_name == "UserService.UserService"
+    assert ctor.qualified_name == "sample.Box.Box"
 
-    # Struct
-    point = next((s for s in symbols if s.name == "Point"), None)
-    assert point is not None
-    assert point.kind == "type"
+    dtor = next((s for s in symbols if s.name == "~Box"), None)
+    assert dtor is not None
+    assert dtor.kind == "method"
+    assert dtor.qualified_name == "sample.Box.~Box"
 
-    # Enum
-    status = next((s for s in symbols if s.name == "Status"), None)
-    assert status is not None
-    assert status.kind == "type"
+    get_method = next((s for s in symbols if s.name == "get"), None)
+    assert get_method is not None
+    assert get_method.kind == "method"
+    assert get_method.qualified_name == "sample.Box.get"
 
-    # Free function
-    auth = next((s for s in symbols if s.name == "authenticate"), None)
-    assert auth is not None
-    assert auth.kind == "function"
-    assert "Authenticate a token string" in auth.docstring
+    # Operator overload
+    op = next((s for s in symbols if "operator" in s.name and "==" in s.name), None)
+    assert op is not None
+    assert op.kind == "method"
 
-    # Template function
-    maximum = next((s for s in symbols if s.name == "maximum"), None)
-    assert maximum is not None
-    assert maximum.kind == "function"
+    # Type alias + enum + constant
+    alias = next((s for s in symbols if s.name == "UserId"), None)
+    assert alias is not None
+    assert alias.kind == "type"
+    assert alias.qualified_name == "sample.UserId"
 
-    # Constant
-    const = next((s for s in symbols if s.name == "MAX_BUFFER_SIZE"), None)
+    enum = next((s for s in symbols if s.name == "Status"), None)
+    assert enum is not None
+    assert enum.kind == "type"
+    assert enum.qualified_name == "sample.Status"
+
+    const = next((s for s in symbols if s.name == "MAX_USERS"), None)
     assert const is not None
     assert const.kind == "constant"
+
+    # Template function signature should include template prefix.
+    identity = next((s for s in symbols if s.name == "identity"), None)
+    assert identity is not None
+    assert identity.kind == "function"
+    assert identity.qualified_name == "sample.identity"
+    assert "template <typename T>" in identity.signature
+
+    # Overload IDs should be disambiguated.
+    add_symbols = [s for s in symbols if s.name == "add" and s.kind == "function"]
+    assert len(add_symbols) >= 2
+    add_ids = [s.id for s in add_symbols]
+    assert any(i.endswith("~1") for i in add_ids)
+    assert any(i.endswith("~2") for i in add_ids)
+
+
+def test_parse_cpp_header_stays_cpp():
+    """C++-style headers should stay in C++ mode."""
+    symbols = parse_file(CPP_HEADER_SOURCE, "sample.h", "cpp")
+    assert symbols
+    assert all(s.language == "cpp" for s in symbols)
+    widget = next((s for s in symbols if s.name == "Widget" and s.kind == "class"), None)
+    assert widget is not None
+    method = next((s for s in symbols if s.name == "Get"), None)
+    assert method is not None
+    assert method.kind == "method"
+
+
+def test_parse_cpp_header_falls_back_to_c():
+    """C-only headers should fall back to C when C++ extraction fails."""
+    symbols = parse_file(C_ONLY_HEADER_SOURCE, "sample.h", "cpp")
+    assert symbols
+    assert all(s.language == "c" for s in symbols)
+    only_c = next((s for s in symbols if s.name == "only_c"), None)
+    assert only_c is not None
+    assert only_c.kind == "function"
+
+
+def test_parse_cpp_edge_operator_and_declarator_names():
+    """C++ edge declarator/operator names should be extracted and scoped."""
+    symbols = parse_file(CPP_EDGE_SOURCE, "edge.cpp", "cpp")
+
+    cls = next((s for s in symbols if s.name == "Ops" and s.kind == "class"), None)
+    assert cls is not None
+    assert cls.qualified_name == "outer.inner.Ops"
+
+    op_index = next((s for s in symbols if "operator[" in s.name), None)
+    assert op_index is not None
+    assert op_index.kind == "method"
+    assert op_index.qualified_name.startswith("outer.inner.Ops.")
+
+    op_call = next((s for s in symbols if "operator(" in s.name), None)
+    assert op_call is not None
+    assert op_call.kind == "method"
+
+    op_conv = next((s for s in symbols if "operator bool" in s.name), None)
+    assert op_conv is not None
+    assert op_conv.kind == "method"
+
+    callback = next((s for s in symbols if s.name == "make_callback"), None)
+    assert callback is not None
+    assert callback.kind == "function"
+    assert callback.qualified_name == "outer.inner.make_callback"
+
+    consume_ref = next((s for s in symbols if s.name == "consume_ref"), None)
+    assert consume_ref is not None
+    assert consume_ref.kind == "function"
+    assert consume_ref.qualified_name == "outer.inner.consume_ref"
+
+
+def test_parse_cpp_declaration_filter_ignores_variables():
+    """Variable declarations should not be indexed as functions in C++."""
+    symbols = parse_file(CPP_EDGE_SOURCE, "edge.cpp", "cpp")
+    variable_names = {"value"}
+    assert all(s.name not in variable_names for s in symbols)
+
+
+def test_parse_cpp_mixed_header_deterministic_selection():
+    """Mixed C/C++ headers should produce deterministic language selection."""
+    run1 = parse_file(MIXED_HEADER_SOURCE, "mixed.h", "cpp")
+    run2 = parse_file(MIXED_HEADER_SOURCE, "mixed.h", "cpp")
+
+    assert run1 and run2
+    langs1 = {s.language for s in run1}
+    langs2 = {s.language for s in run2}
+    assert langs1 == langs2
+    assert len(langs1) == 1
+
+
+def test_parse_cpp_header_with_cpp_keywords_stays_cpp():
+    """C++ keywords in headers should strongly select C++ parsing."""
+    symbols = parse_file(CXX_KEYWORDS_HEADER_SOURCE, "keywords.h", "cpp")
+    assert symbols
+    assert all(s.language == "cpp" for s in symbols)
+    names = {s.name for s in symbols if s.kind in {"function", "method"}}
+    assert "id" in names
+    assert "succ" in names
 
 

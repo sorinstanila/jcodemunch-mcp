@@ -260,3 +260,66 @@ def test_codeindex_search():
     
     results = index.search("login", kind="function")
     assert len(results) > 0
+
+
+def test_incremental_save_recomputes_languages_from_merged_symbols(tmp_path):
+    """incremental_save should derive languages from merged symbols, not caller counts."""
+    store = IndexStore(base_path=str(tmp_path))
+
+    py_sym = Symbol(
+        id="app-py::run#function",
+        file="app.py",
+        name="run",
+        qualified_name="run",
+        kind="function",
+        language="python",
+        signature="def run():",
+        byte_offset=0,
+        byte_length=10,
+    )
+    c_sym = Symbol(
+        id="api-h::only_c#function",
+        file="api.h",
+        name="only_c",
+        qualified_name="only_c",
+        kind="function",
+        language="c",
+        signature="int only_c(void)",
+        byte_offset=0,
+        byte_length=20,
+    )
+
+    store.save_index(
+        owner="lang",
+        name="demo",
+        source_files=["app.py", "api.h"],
+        symbols=[py_sym, c_sym],
+        raw_files={"app.py": "def run():\n    pass\n", "api.h": "int only_c(void) { return 0; }\n"},
+        languages={"python": 1, "c": 1},
+    )
+
+    cpp_sym = Symbol(
+        id="api-h::Widget#class",
+        file="api.h",
+        name="Widget",
+        qualified_name="Widget",
+        kind="class",
+        language="cpp",
+        signature="class Widget",
+        byte_offset=0,
+        byte_length=12,
+    )
+
+    updated = store.incremental_save(
+        owner="lang",
+        name="demo",
+        changed_files=["api.h"],
+        new_files=[],
+        deleted_files=[],
+        new_symbols=[cpp_sym],
+        raw_files={"api.h": "class Widget { public: int Get() const; };"},
+        languages={"c": 99},  # stale caller-provided data; should be ignored
+    )
+
+    assert updated is not None
+    assert updated.languages == {"python": 1, "cpp": 1}

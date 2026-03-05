@@ -4,10 +4,18 @@ import pytest
 from pathlib import Path
 
 from jcodemunch_mcp.tools.index_folder import index_folder
+from jcodemunch_mcp.storage import IndexStore
 
 
 def _write_py(d: Path, name: str, content: str) -> Path:
     """Write a Python file into directory d."""
+    p = d / name
+    p.write_text(content, encoding="utf-8")
+    return p
+
+
+def _write_file(d: Path, name: str, content: str) -> Path:
+    """Write an arbitrary source file into directory d."""
     p = d / name
     p.write_text(content, encoding="utf-8")
     return p
@@ -122,3 +130,98 @@ class TestIncrementalIndexFolder:
         result2 = index_folder(str(src), use_ai_summaries=False, storage_path=str(store))
         assert result2["success"] is True
         assert "incremental" not in result2
+
+    def test_incremental_reclassifies_h_language_from_c_to_cpp(self, tmp_path):
+        """Changing .h from C-like to C++-like should update persisted language counts."""
+        src = tmp_path / "src"
+        src.mkdir()
+        store = tmp_path / "store"
+
+        _write_file(src, "api.h", "int only_c(void) { int v[] = (int[]){1,2,3}; return v[0]; }\n")
+
+        full = index_folder(str(src), use_ai_summaries=False, storage_path=str(store))
+        assert full["success"] is True
+        assert full["languages"] == {"c": 1}
+
+        _write_file(
+            src,
+            "api.h",
+            "namespace demo { class Widget { public: int Get() const; }; }\n",
+        )
+
+        inc = index_folder(str(src), use_ai_summaries=False, storage_path=str(store), incremental=True)
+        assert inc["success"] is True
+        assert inc["changed"] == 1
+
+        idx = IndexStore(base_path=str(store)).load_index("local", src.name)
+        assert idx is not None
+        assert idx.languages.get("cpp") == 1
+        assert "c" not in idx.languages
+
+    def test_incremental_delete_and_readd_h_updates_language_counts(self, tmp_path):
+        """Deleting and re-adding .h with different style should keep language counts correct."""
+        src = tmp_path / "src"
+        src.mkdir()
+        store = tmp_path / "store"
+
+        _write_file(src, "api.h", "int only_c(void) { int v[] = (int[]){1,2,3}; return v[0]; }\n")
+        _write_file(src, "main.cpp", "namespace demo { int add(int a, int b) { return a + b; } }\n")
+
+        full = index_folder(str(src), use_ai_summaries=False, storage_path=str(store))
+        assert full["success"] is True
+        assert full["languages"] == {"c": 1, "cpp": 1}
+
+        (src / "api.h").unlink()
+        inc_delete = index_folder(str(src), use_ai_summaries=False, storage_path=str(store), incremental=True)
+        assert inc_delete["success"] is True
+        assert inc_delete["deleted"] == 1
+
+        idx_after_delete = IndexStore(base_path=str(store)).load_index("local", src.name)
+        assert idx_after_delete is not None
+        assert idx_after_delete.languages == {"cpp": 1}
+
+        _write_file(src, "api.h", "namespace demo { class Readded { public: int Go() const; }; }\n")
+        inc_add = index_folder(str(src), use_ai_summaries=False, storage_path=str(store), incremental=True)
+        assert inc_add["success"] is True
+        assert inc_add["new"] == 1
+
+        idx_after_add = IndexStore(base_path=str(store)).load_index("local", src.name)
+        assert idx_after_add is not None
+        assert idx_after_add.languages == {"cpp": 2}
+
+    def test_incremental_no_symbol_file_not_repeatedly_new(self, tmp_path):
+        """No-symbol files should not be repeatedly reported as new across incremental runs."""
+        src = tmp_path / "src"
+        src.mkdir()
+        store = tmp_path / "store"
+
+        _write_file(src, "main.cpp", "int main() { return 0; }\n")
+        _write_file(src, "no_symbols.h", "/* no symbols here */\n")
+
+        full = index_folder(str(src), use_ai_summaries=False, storage_path=str(store))
+        assert full["success"] is True
+        assert full["no_symbols_count"] >= 1
+
+        # No changes should be clean on first incremental run.
+        inc1 = index_folder(str(src), use_ai_summaries=False, storage_path=str(store), incremental=True)
+        assert inc1["success"] is True
+        assert inc1["message"] == "No changes detected"
+        assert inc1["changed"] == 0
+        assert inc1["new"] == 0
+        assert inc1["deleted"] == 0
+
+        # Change the no-symbol file once.
+        _write_file(src, "no_symbols.h", "/* still no symbols, but changed */\n")
+        inc2 = index_folder(str(src), use_ai_summaries=False, storage_path=str(store), incremental=True)
+        assert inc2["success"] is True
+        assert inc2["changed"] == 1
+        assert inc2["new"] == 0
+        assert inc2["deleted"] == 0
+
+        # Next incremental should be clean again (no repeated churn).
+        inc3 = index_folder(str(src), use_ai_summaries=False, storage_path=str(store), incremental=True)
+        assert inc3["success"] is True
+        assert inc3["message"] == "No changes detected"
+        assert inc3["changed"] == 0
+        assert inc3["new"] == 0
+        assert inc3["deleted"] == 0

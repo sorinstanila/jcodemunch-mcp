@@ -369,7 +369,7 @@ class IndexStore:
             deleted_files: Deleted files (symbols will be removed).
             new_symbols: Symbols extracted from changed + new files.
             raw_files: Raw content for changed + new files.
-            languages: Updated language counts.
+            languages: Legacy language counts (ignored when symbols are present).
             git_head: Current HEAD commit hash.
 
         Returns:
@@ -385,6 +385,9 @@ class IndexStore:
 
         # Add new symbols
         all_symbols_dicts = kept_symbols + [self._symbol_to_dict(s) for s in new_symbols]
+        recomputed_languages = self._languages_from_symbols(all_symbols_dicts)
+        if not recomputed_languages and languages:
+            recomputed_languages = languages
 
         # Update source files list
         old_files = set(index.source_files)
@@ -409,7 +412,7 @@ class IndexStore:
             name=name,
             indexed_at=datetime.now().isoformat(),
             source_files=sorted(old_files),
-            languages=languages,
+            languages=recomputed_languages,
             symbols=all_symbols_dicts,
             index_version=INDEX_VERSION,
             file_hashes=file_hashes,
@@ -445,6 +448,21 @@ class IndexStore:
                 f.write(content)
 
         return updated
+
+    def _languages_from_symbols(self, symbols: list[dict]) -> dict[str, int]:
+        """Compute language->file_count from serialized symbols."""
+        file_languages: dict[str, str] = {}
+        for sym in symbols:
+            file_path = sym.get("file")
+            language = sym.get("language")
+            if not file_path or not language:
+                continue
+            file_languages.setdefault(file_path, language)
+
+        counts: dict[str, int] = {}
+        for language in file_languages.values():
+            counts[language] = counts.get(language, 0) + 1
+        return counts
 
     def list_repos(self) -> list[dict]:
         """List all indexed repositories."""

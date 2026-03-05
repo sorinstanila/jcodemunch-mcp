@@ -1,6 +1,7 @@
 """Index repository tool - fetch, parse, summarize, save."""
 
 import asyncio
+import hashlib
 import os
 from typing import Optional
 from urllib.parse import urlparse
@@ -285,11 +286,12 @@ async def index_repo(
 
             files_to_parse = set(changed) | set(new)
             new_symbols = []
-            languages: dict[str, int] = {}
             raw_files_subset: dict[str, str] = {}
 
             for path in files_to_parse:
                 content = current_files[path]
+                # Track file hashes for changed/new files even when symbol extraction yields none.
+                raw_files_subset[path] = content
                 _, ext = os.path.splitext(path)
                 language = LANGUAGE_EXTENSIONS.get(ext)
                 if not language:
@@ -298,24 +300,16 @@ async def index_repo(
                     symbols = parse_file(content, path, language)
                     if symbols:
                         new_symbols.extend(symbols)
-                        raw_files_subset[path] = content
                 except Exception:
                     warnings.append(f"Failed to parse {path}")
 
             new_symbols = summarize_symbols(new_symbols, use_ai=use_ai_summaries)
 
-            # Compute language counts from all current files
-            for path in current_files:
-                _, ext = os.path.splitext(path)
-                lang = LANGUAGE_EXTENSIONS.get(ext)
-                if lang:
-                    languages[lang] = languages.get(lang, 0) + 1
-
             updated = store.incremental_save(
                 owner=owner, name=repo,
                 changed_files=changed, new_files=new, deleted_files=deleted,
                 new_symbols=new_symbols, raw_files=raw_files_subset,
-                languages=languages,
+                languages={},
             )
 
             result = {
@@ -345,7 +339,8 @@ async def index_repo(
                 symbols = parse_file(content, path, language)
                 if symbols:
                     all_symbols.extend(symbols)
-                    languages[language] = languages.get(language, 0) + 1
+                    file_language = symbols[0].language or language
+                    languages[file_language] = languages.get(file_language, 0) + 1
                     raw_files[path] = content
                     parsed_files.append(path)
             except Exception:
@@ -359,13 +354,20 @@ async def index_repo(
         all_symbols = summarize_symbols(all_symbols, use_ai=use_ai_summaries)
 
         # Save index
+        # Track hashes for all discovered source files so incremental change detection
+        # does not repeatedly report no-symbol files as "new".
+        file_hashes = {
+            fp: hashlib.sha256(content.encode("utf-8")).hexdigest()
+            for fp, content in current_files.items()
+        }
         store.save_index(
             owner=owner,
             name=repo,
             source_files=parsed_files,
             symbols=all_symbols,
             raw_files=raw_files,
-            languages=languages
+            languages=languages,
+            file_hashes=file_hashes,
         )
 
         result = {
