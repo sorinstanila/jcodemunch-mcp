@@ -965,3 +965,92 @@ def test_parse_cpp_header_with_cpp_keywords_stays_cpp():
     assert "succ" in names
 
 
+RUBY_SOURCE = '''\
+# Serialization helpers.
+module Serializable
+  def serialize
+    {}
+  end
+end
+
+# Represents a user.
+class User
+  include Serializable
+
+  def initialize(name, email)
+    @name = name
+    @email = email
+  end
+
+  # Finds a user by ID.
+  def self.find(id)
+    nil
+  end
+
+  def greet
+    "Hello, #{@name}!"
+  end
+
+  private
+
+  def valid_email?
+    @email.include?('@')
+  end
+end
+
+# Top-level helper.
+def format_name(first, last)
+  "#{first} #{last}"
+end
+'''
+
+
+def test_parse_ruby():
+    """Test Ruby parsing."""
+    symbols = parse_file(RUBY_SOURCE, "sample.rb", "ruby")
+
+    # Module → type
+    mod = next((s for s in symbols if s.name == "Serializable"), None)
+    assert mod is not None
+    assert mod.kind == "type"
+    assert "Serialization" in mod.docstring
+
+    # Method inside module
+    serialize = next((s for s in symbols if s.name == "serialize"), None)
+    assert serialize is not None
+    assert serialize.kind == "method"
+    assert serialize.qualified_name == "Serializable.serialize"
+
+    # Class
+    cls = next((s for s in symbols if s.name == "User"), None)
+    assert cls is not None
+    assert cls.kind == "class"
+    assert "Represents" in cls.docstring
+
+    # Instance method
+    init = next((s for s in symbols if s.name == "initialize"), None)
+    assert init is not None
+    assert init.kind == "method"
+    assert init.qualified_name == "User.initialize"
+    assert init.parent == cls.id
+
+    # Singleton method (def self.find)
+    find = next((s for s in symbols if s.name == "find"), None)
+    assert find is not None
+    assert find.kind == "method"
+    assert find.qualified_name == "User.find"
+    assert "Finds a user" in find.docstring
+
+    # Private method
+    valid = next((s for s in symbols if s.name == "valid_email?"), None)
+    assert valid is not None
+    assert valid.kind == "method"
+
+    # Top-level function
+    fmt = next((s for s in symbols if s.name == "format_name"), None)
+    assert fmt is not None
+    assert fmt.kind == "function"
+    assert fmt.qualified_name == "format_name"
+    assert "Top-level" in fmt.docstring
+
+

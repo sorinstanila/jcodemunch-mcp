@@ -71,6 +71,8 @@ LANGUAGE_EXTENSIONS = {
     ".swift": "swift",
     ".ex": "elixir",
     ".exs": "elixir",
+    ".rb": "ruby",
+    ".rake": "ruby",
 }
 
 
@@ -486,6 +488,34 @@ ELIXIR_SPEC = LanguageSpec(
 )
 
 
+# Ruby specification
+RUBY_SPEC = LanguageSpec(
+    ts_language="ruby",
+    symbol_node_types={
+        "method": "function",           # top-level → function; inside class/module → method
+        "singleton_method": "function", # def self.foo → always has class parent → method
+        "class": "class",
+        "module": "type",
+    },
+    name_fields={
+        "method": "name",
+        "singleton_method": "name",
+        "class": "name",
+        "module": "name",
+    },
+    param_fields={
+        "method": "parameters",
+        "singleton_method": "parameters",
+    },
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["class", "module"],
+    constant_patterns=[],
+    type_patterns=["module"],
+)
+
+
 # Language registry
 LANGUAGE_REGISTRY = {
     "python": PYTHON_SPEC,
@@ -501,4 +531,5 @@ LANGUAGE_REGISTRY = {
     "swift": SWIFT_SPEC,
     "cpp": CPP_SPEC,
     "elixir": ELIXIR_SPEC,
+    "ruby": RUBY_SPEC,
 }

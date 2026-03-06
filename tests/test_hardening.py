@@ -450,6 +450,41 @@ int only_c(void) { int v[] = (int[]){1,2,3}; return v[0]; }
         add = _by_name(symbols, "add")
         assert add.qualified_name == "MyApp.Calculator.add"
 
+    # -- Ruby ------------------------------------------------------------
+
+    def test_ruby_class(self):
+        content, fname = _fixture("ruby", "sample.rb")
+        symbols = parse_file(content, fname, "ruby")
+        cls = _by_name(symbols, "User")
+        assert cls.kind == "class"
+        assert cls.language == "ruby"
+
+    def test_ruby_module(self):
+        content, fname = _fixture("ruby", "sample.rb")
+        symbols = parse_file(content, fname, "ruby")
+        mod = _by_name(symbols, "Serializable")
+        assert mod.kind == "type"
+
+    def test_ruby_method_qualified_name(self):
+        content, fname = _fixture("ruby", "sample.rb")
+        symbols = parse_file(content, fname, "ruby")
+        m = _by_name(symbols, "initialize")
+        assert m.qualified_name == "User.initialize"
+        assert m.kind == "method"
+
+    def test_ruby_singleton_method(self):
+        content, fname = _fixture("ruby", "sample.rb")
+        symbols = parse_file(content, fname, "ruby")
+        find = _by_name(symbols, "find")
+        assert find.kind == "method"
+        assert find.qualified_name == "User.find"
+
+    def test_ruby_top_level_function(self):
+        content, fname = _fixture("ruby", "sample.rb")
+        symbols = parse_file(content, fname, "ruby")
+        fmt = _by_name(symbols, "format_name")
+        assert fmt.kind == "function"
+
 
 # ===========================================================================
 # 2. Overload Disambiguation
@@ -537,6 +572,7 @@ class TestDeterminism:
         ("c", "sample.c"),
         ("cpp", "sample.cpp"),
         ("elixir", "sample.ex"),
+        ("ruby", "sample.rb"),
     ])
     def test_deterministic_ids_and_hashes(self, language, filename):
         content, fname = _fixture(language, filename)
