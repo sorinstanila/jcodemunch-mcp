@@ -37,12 +37,16 @@ def test_discover_source_files():
         {"path": "node_modules/foo.js", "type": "blob", "size": 500},
         {"path": "README.md", "type": "blob", "size": 200},
         {"path": "src/utils.py", "type": "blob", "size": 500},
+        {"path": "src/engine.cpp", "type": "blob", "size": 700},
+        {"path": "include/engine.hpp", "type": "blob", "size": 350},
     ]
     
     files = discover_source_files(tree_entries, gitignore_content=None)
     
     assert "src/main.py" in files
     assert "src/utils.py" in files
+    assert "src/engine.cpp" in files
+    assert "include/engine.hpp" in files
     assert "node_modules/foo.js" not in files
     assert "README.md" not in files  # Not a source file
 

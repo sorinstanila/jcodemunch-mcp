@@ -1,7 +1,7 @@
 """Generic AST symbol extractor using tree-sitter."""
 
 from typing import Optional
-from tree_sitter_language_pack import get_language, get_parser
+from tree_sitter_language_pack import get_parser
 
 from .symbols import Symbol, make_symbol_id, compute_content_hash
 from .languages import LanguageSpec, LANGUAGE_REGISTRY
@@ -21,20 +21,95 @@ def parse_file(content: str, filename: str, language: str) -> list[Symbol]:
     if language not in LANGUAGE_REGISTRY:
         return []
     
-    spec = LANGUAGE_REGISTRY[language]
     source_bytes = content.encode("utf-8")
-    
-    # Get parser for this language
-    parser = get_parser(spec.ts_language)
-    tree = parser.parse(source_bytes)
-    
-    symbols = []
-    _walk_tree(tree.root_node, spec, source_bytes, filename, language, symbols, None)
+
+    if language == "cpp":
+        symbols = _parse_cpp_symbols(source_bytes, filename)
+    else:
+        spec = LANGUAGE_REGISTRY[language]
+        symbols = _parse_with_spec(source_bytes, filename, language, spec)
 
     # Disambiguate overloaded symbols (same ID)
     symbols = _disambiguate_overloads(symbols)
 
     return symbols
+
+
+def _parse_with_spec(
+    source_bytes: bytes,
+    filename: str,
+    language: str,
+    spec: LanguageSpec,
+) -> list[Symbol]:
+    """Parse source bytes using one language spec."""
+    try:
+        parser = get_parser(spec.ts_language)
+        tree = parser.parse(source_bytes)
+    except Exception:
+        return []
+
+    symbols: list[Symbol] = []
+    _walk_tree(tree.root_node, spec, source_bytes, filename, language, symbols, None)
+    return symbols
+
+
+def _parse_cpp_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
+    """Parse C++ and auto-fallback to C for `.h` files with no C++ symbols."""
+    cpp_spec = LANGUAGE_REGISTRY["cpp"]
+    cpp_symbols: list[Symbol] = []
+    cpp_error_nodes = 0
+    try:
+        parser = get_parser(cpp_spec.ts_language)
+        tree = parser.parse(source_bytes)
+        cpp_error_nodes = _count_error_nodes(tree.root_node)
+        _walk_tree(tree.root_node, cpp_spec, source_bytes, filename, "cpp", cpp_symbols, None)
+    except Exception:
+        cpp_error_nodes = 10**9
+
+    # Non-headers are always C++.
+    if not filename.lower().endswith(".h"):
+        return cpp_symbols
+
+    # Header auto-detection: parse both C++ and C, prefer better parse quality.
+    c_spec = LANGUAGE_REGISTRY.get("c")
+    if not c_spec:
+        return cpp_symbols
+
+    c_symbols: list[Symbol] = []
+    c_error_nodes = 10**9
+    try:
+        c_parser = get_parser(c_spec.ts_language)
+        c_tree = c_parser.parse(source_bytes)
+        c_error_nodes = _count_error_nodes(c_tree.root_node)
+        _walk_tree(c_tree.root_node, c_spec, source_bytes, filename, "c", c_symbols, None)
+    except Exception:
+        c_error_nodes = 10**9
+
+    # If only one parser yields symbols, use that parser's symbols.
+    if cpp_symbols and not c_symbols:
+        return cpp_symbols
+    if c_symbols and not cpp_symbols:
+        return c_symbols
+    if not cpp_symbols and not c_symbols:
+        return cpp_symbols
+
+    # Both yielded symbols: choose fewer parse errors first, then richer symbol output.
+    if c_error_nodes < cpp_error_nodes:
+        return c_symbols
+    if cpp_error_nodes < c_error_nodes:
+        return cpp_symbols
+
+    # Same error quality: use lexical signal to break ties for `.h`.
+    if _looks_like_cpp_header(source_bytes):
+        if len(cpp_symbols) >= len(c_symbols):
+            return cpp_symbols
+    else:
+        return c_symbols
+
+    if len(c_symbols) > len(cpp_symbols):
+        return c_symbols
+
+    return cpp_symbols
 
 
 def _walk_tree(
@@ -44,31 +119,67 @@ def _walk_tree(
     filename: str,
     language: str,
     symbols: list,
-    parent_symbol: Optional[Symbol] = None
+    parent_symbol: Optional[Symbol] = None,
+    scope_parts: Optional[list[str]] = None,
+    class_scope_depth: int = 0,
 ):
     """Recursively walk the AST and extract symbols."""
     # Dart: function_signature inside method_signature is handled by method_signature
     if node.type == "function_signature" and node.parent and node.parent.type == "method_signature":
         return
 
+    is_cpp = language == "cpp"
+    local_scope_parts = scope_parts or []
+    next_parent = parent_symbol
+    next_class_scope_depth = class_scope_depth
+
+    if is_cpp and node.type == "namespace_definition":
+        ns_name = _extract_cpp_namespace_name(node, source_bytes)
+        if ns_name:
+            local_scope_parts = [*local_scope_parts, ns_name]
+
     # Check if this node is a symbol
     if node.type in spec.symbol_node_types:
-        symbol = _extract_symbol(
-            node, spec, source_bytes, filename, language, parent_symbol
-        )
-        if symbol:
-            symbols.append(symbol)
-            parent_symbol = symbol
-    
+        # C++ declarations include non-function declarations. Filter those out.
+        if not (is_cpp and node.type in {"declaration", "field_declaration"} and not _is_cpp_function_declaration(node)):
+            symbol = _extract_symbol(
+                node,
+                spec,
+                source_bytes,
+                filename,
+                language,
+                parent_symbol,
+                local_scope_parts,
+                class_scope_depth,
+            )
+            if symbol:
+                symbols.append(symbol)
+                if is_cpp:
+                    if _is_cpp_type_container(node):
+                        next_parent = symbol
+                        next_class_scope_depth = class_scope_depth + 1
+                else:
+                    next_parent = symbol
+
     # Check for constant patterns (top-level assignments with UPPER_CASE names)
     if node.type in spec.constant_patterns and parent_symbol is None:
         const_symbol = _extract_constant(node, spec, source_bytes, filename, language)
         if const_symbol:
             symbols.append(const_symbol)
-    
+
     # Recurse into children
     for child in node.children:
-        _walk_tree(child, spec, source_bytes, filename, language, symbols, parent_symbol)
+        _walk_tree(
+            child,
+            spec,
+            source_bytes,
+            filename,
+            language,
+            symbols,
+            next_parent,
+            local_scope_parts,
+            next_class_scope_depth,
+        )
 
 
 def _extract_symbol(
@@ -77,7 +188,9 @@ def _extract_symbol(
     source_bytes: bytes,
     filename: str,
     language: str,
-    parent_symbol: Optional[Symbol] = None
+    parent_symbol: Optional[Symbol] = None,
+    scope_parts: Optional[list[str]] = None,
+    class_scope_depth: int = 0,
 ) -> Optional[Symbol]:
     """Extract a Symbol from an AST node."""
     kind = spec.symbol_node_types[node.type]
@@ -92,21 +205,38 @@ def _extract_symbol(
         return None
     
     # Build qualified name
-    if parent_symbol:
-        qualified_name = f"{parent_symbol.name}.{name}"
-        kind = "method" if kind == "function" else kind
+    if language == "cpp":
+        if parent_symbol:
+            qualified_name = f"{parent_symbol.qualified_name}.{name}"
+        elif scope_parts:
+            qualified_name = ".".join([*scope_parts, name])
+        else:
+            qualified_name = name
+        if kind == "function" and class_scope_depth > 0:
+            kind = "method"
     else:
-        qualified_name = name
-    
+        if parent_symbol:
+            qualified_name = f"{parent_symbol.name}.{name}"
+            kind = "method" if kind == "function" else kind
+        else:
+            qualified_name = name
+
+    signature_node = node
+    if language == "cpp":
+        wrapper = _nearest_cpp_template_wrapper(node)
+        if wrapper:
+            signature_node = wrapper
+
     # Build signature
-    signature = _build_signature(node, spec, source_bytes)
-    
+    signature = _build_signature(signature_node, spec, source_bytes)
+
     # Extract docstring
-    docstring = _extract_docstring(node, spec, source_bytes)
-    
+    docstring = _extract_docstring(signature_node, spec, source_bytes)
+
     # Extract decorators
     decorators = _extract_decorators(node, spec, source_bytes)
-    
+
+    start_node = signature_node
     # Dart: function_signature/method_signature have their body as a next sibling
     end_byte = node.end_byte
     end_line_num = node.end_point[0] + 1
@@ -117,7 +247,7 @@ def _extract_symbol(
             end_line_num = next_sib.end_point[0] + 1
 
     # Compute content hash
-    symbol_bytes = source_bytes[node.start_byte:end_byte]
+    symbol_bytes = source_bytes[start_node.start_byte:end_byte]
     c_hash = compute_content_hash(symbol_bytes)
 
     # Create symbol
@@ -132,10 +262,10 @@ def _extract_symbol(
         docstring=docstring,
         decorators=decorators,
         parent=parent_symbol.id if parent_symbol else None,
-        line=node.start_point[0] + 1,
+        line=start_node.start_point[0] + 1,
         end_line=end_line_num,
-        byte_offset=node.start_byte,
-        byte_length=end_byte - node.start_byte,
+        byte_offset=start_node.start_byte,
+        byte_length=end_byte - start_node.start_byte,
         content_hash=c_hash,
     )
     
@@ -188,6 +318,9 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
     name_node = node.child_by_field_name(field_name)
     
     if name_node:
+        if spec.ts_language == "cpp":
+            return _extract_cpp_name(name_node, source_bytes)
+
         # C function_definition: declarator is a function_declarator,
         # which wraps the actual identifier. Unwrap recursively.
         while name_node.type in ("function_declarator", "pointer_declarator", "reference_declarator"):
@@ -201,16 +334,86 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
     return None
 
 
+def _extract_cpp_name(name_node, source_bytes: bytes) -> Optional[str]:
+    """Extract C++ symbol names from nested declarators."""
+    current = name_node
+    wrapper_types = {
+        "function_declarator",
+        "pointer_declarator",
+        "reference_declarator",
+        "array_declarator",
+        "parenthesized_declarator",
+        "attributed_declarator",
+        "init_declarator",
+    }
+
+    while current.type in wrapper_types:
+        inner = current.child_by_field_name("declarator")
+        if not inner:
+            break
+        current = inner
+
+    # Prefer typed name children where available.
+    if current.type in {"qualified_identifier", "scoped_identifier"}:
+        name_node = current.child_by_field_name("name")
+        if name_node:
+            text = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8").strip()
+            if text:
+                return text
+
+    subtree_name = _find_cpp_name_in_subtree(current, source_bytes)
+    if subtree_name:
+        return subtree_name
+
+    text = source_bytes[current.start_byte:current.end_byte].decode("utf-8").strip()
+    return text or None
+
+
+def _find_cpp_name_in_subtree(node, source_bytes: bytes) -> Optional[str]:
+    """Best-effort extraction of a callable/type name from a declarator subtree."""
+    direct_types = {"identifier", "field_identifier", "operator_name", "destructor_name", "type_identifier"}
+    if node.type in direct_types:
+        text = source_bytes[node.start_byte:node.end_byte].decode("utf-8").strip()
+        return text or None
+
+    if node.type in {"qualified_identifier", "scoped_identifier"}:
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            return _find_cpp_name_in_subtree(name_node, source_bytes)
+
+    for child in node.children:
+        if not child.is_named:
+            continue
+        found = _find_cpp_name_in_subtree(child, source_bytes)
+        if found:
+            return found
+    return None
+
+
 def _build_signature(node, spec: LanguageSpec, source_bytes: bytes) -> str:
     """Build a clean signature from AST node."""
-    # Find the body child to determine where signature ends
-    body = node.child_by_field_name("body")
-    
-    if body:
-        # Signature is from start of node to start of body
-        end_byte = body.start_byte
+    if node.type == "template_declaration":
+        inner = node.child_by_field_name("declaration")
+        if not inner:
+            for child in reversed(node.children):
+                if child.is_named:
+                    inner = child
+                    break
+
+        if inner:
+            body = inner.child_by_field_name("body")
+            end_byte = body.start_byte if body else inner.end_byte
+        else:
+            end_byte = node.end_byte
     else:
-        end_byte = node.end_byte
+        # Find the body child to determine where signature ends
+        body = node.child_by_field_name("body")
+
+        if body:
+            # Signature is from start of node to start of body
+            end_byte = body.start_byte
+        else:
+            end_byte = node.end_byte
     
     sig_bytes = source_bytes[node.start_byte:end_byte]
     sig_text = sig_bytes.decode("utf-8").strip()
@@ -219,6 +422,90 @@ def _build_signature(node, spec: LanguageSpec, source_bytes: bytes) -> str:
     sig_text = sig_text.rstrip("{: \n\t")
     
     return sig_text
+
+
+def _nearest_cpp_template_wrapper(node):
+    """Return closest enclosing template_declaration (if any)."""
+    current = node
+    wrapper = None
+    while current.parent and current.parent.type == "template_declaration":
+        wrapper = current.parent
+        current = current.parent
+    return wrapper
+
+
+def _is_cpp_type_container(node) -> bool:
+    """C++ node types that can contain methods."""
+    return node.type in {"class_specifier", "struct_specifier", "union_specifier"}
+
+
+def _is_cpp_function_declaration(node) -> bool:
+    """True if a C++ declaration node is function-like."""
+    if node.type not in {"declaration", "field_declaration"}:
+        return True
+
+    declarator = node.child_by_field_name("declarator")
+    if not declarator:
+        return False
+    return _has_function_declarator(declarator)
+
+
+def _has_function_declarator(node) -> bool:
+    """Check subtree for function declarator nodes."""
+    if node.type in {"function_declarator", "abstract_function_declarator"}:
+        return True
+
+    for child in node.children:
+        if child.is_named and _has_function_declarator(child):
+            return True
+    return False
+
+
+def _extract_cpp_namespace_name(node, source_bytes: bytes) -> Optional[str]:
+    """Extract namespace name from a namespace_definition node."""
+    name_node = node.child_by_field_name("name")
+    if not name_node:
+        for child in node.children:
+            if child.type in {"namespace_identifier", "identifier"}:
+                name_node = child
+                break
+
+    if not name_node:
+        return None
+
+    name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8").strip()
+    return name or None
+
+
+def _looks_like_cpp_header(source_bytes: bytes) -> bool:
+    """Heuristic: detect obvious C++ constructs in `.h` content."""
+    text = source_bytes.decode("utf-8", errors="ignore")
+    cpp_markers = (
+        "namespace ",
+        "class ",
+        "template<",
+        "template <",
+        "constexpr",
+        "noexcept",
+        "[[",
+        "std::",
+        "using ",
+        "::",
+        "public:",
+        "private:",
+        "protected:",
+        "operator",
+        "typename",
+    )
+    return any(marker in text for marker in cpp_markers)
+
+
+def _count_error_nodes(node) -> int:
+    """Count parser ERROR nodes in a syntax tree subtree."""
+    count = 1 if node.type == "ERROR" else 0
+    for child in node.children:
+        count += _count_error_nodes(child)
+    return count
 
 
 def _extract_docstring(node, spec: LanguageSpec, source_bytes: bytes) -> str:

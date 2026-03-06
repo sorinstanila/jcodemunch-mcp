@@ -272,6 +272,68 @@ class TestPerLanguageExtraction:
         symbols = parse_file(content, fname, "csharp")
         record = _by_name(symbols, "Person")
         assert record.kind == "class"
+
+    # -- C++ -------------------------------------------------------------
+
+    def test_cpp_class(self):
+        content, fname = _fixture("cpp", "sample.cpp")
+        symbols = parse_file(content, fname, "cpp")
+        cls = _by_name(symbols, "Box")
+        assert cls.kind == "class"
+        assert "sample" in cls.qualified_name
+
+    def test_cpp_method_qualified_name(self):
+        content, fname = _fixture("cpp", "sample.cpp")
+        symbols = parse_file(content, fname, "cpp")
+        method = _by_name(symbols, "get")
+        assert method.kind == "method"
+        assert "Box" in method.qualified_name
+
+    def test_cpp_alias_and_enum(self):
+        content, fname = _fixture("cpp", "sample.cpp")
+        symbols = parse_file(content, fname, "cpp")
+        alias = _by_name(symbols, "UserId")
+        status = _by_name(symbols, "Status")
+        assert alias.kind == "type"
+        assert status.kind == "type"
+
+    def test_cpp_constant(self):
+        content, fname = _fixture("cpp", "sample.cpp")
+        symbols = parse_file(content, fname, "cpp")
+        const = _by_name(symbols, "MAX_USERS")
+        assert const.kind == "constant"
+
+    def test_cpp_overload_disambiguation(self):
+        content, fname = _fixture("cpp", "sample.cpp")
+        symbols = parse_file(content, fname, "cpp")
+        add_syms = [s for s in symbols if s.name == "add" and s.kind == "function"]
+        assert len(add_syms) >= 2
+        ids = [s.id for s in add_syms]
+        assert any(i.endswith("~1") for i in ids)
+        assert any(i.endswith("~2") for i in ids)
+
+    def test_cpp_nested_namespace_qualification(self):
+        content = """
+namespace a { namespace b {
+class Thing { public: int run() const { return 1; } };
+} }
+"""
+        symbols = parse_file(content, "ns.cpp", "cpp")
+        cls = _by_name(symbols, "Thing")
+        run = _by_name(symbols, "run")
+        assert cls.qualified_name == "a.b.Thing"
+        assert run.qualified_name == "a.b.Thing.run"
+
+    def test_cpp_mixed_header_deterministic(self):
+        content = """
+class MaybeCpp { public: int Get() const; };
+int only_c(void) { int v[] = (int[]){1,2,3}; return v[0]; }
+"""
+        run1 = parse_file(content, "mixed.h", "cpp")
+        run2 = parse_file(content, "mixed.h", "cpp")
+        assert run1 and run2
+        assert {s.language for s in run1} == {s.language for s in run2}
+
     # -- C ---------------------------------------------------------------
 
     def test_c_functions(self):
@@ -313,20 +375,21 @@ class TestPerLanguageExtraction:
         symbols = parse_file(content, fname, "cpp")
         grouped = _kinds(symbols)
         func_names = {f.name for f in grouped.get("function", [])}
-        assert "authenticate" in func_names
+        assert "identity" in func_names
         assert "add" in func_names
 
     def test_cpp_class(self):
         content, fname = _fixture("cpp", "sample.cpp")
         symbols = parse_file(content, fname, "cpp")
-        cls = _by_name(symbols, "UserService")
+        cls = _by_name(symbols, "Box")
         assert cls.kind == "class"
+        assert "sample" in cls.qualified_name
 
     def test_cpp_struct(self):
         content, fname = _fixture("cpp", "sample.cpp")
         symbols = parse_file(content, fname, "cpp")
-        point = _by_name(symbols, "Point")
-        assert point.kind == "type"
+        alias = _by_name(symbols, "UserId")
+        assert alias.kind == "type"
 
     def test_cpp_enum(self):
         content, fname = _fixture("cpp", "sample.cpp")
@@ -337,15 +400,15 @@ class TestPerLanguageExtraction:
     def test_cpp_constant(self):
         content, fname = _fixture("cpp", "sample.cpp")
         symbols = parse_file(content, fname, "cpp")
-        const = _by_name(symbols, "MAX_BUFFER_SIZE")
+        const = _by_name(symbols, "MAX_USERS")
         assert const.kind == "constant"
 
     def test_cpp_method_qualified_name(self):
         content, fname = _fixture("cpp", "sample.cpp")
         symbols = parse_file(content, fname, "cpp")
-        method = _by_name(symbols, "getUser")
+        method = _by_name(symbols, "get")
         assert method.kind == "method"
-        assert "UserService" in method.qualified_name
+        assert "Box" in method.qualified_name
 
 
 # ===========================================================================

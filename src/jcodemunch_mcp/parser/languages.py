@@ -61,12 +61,12 @@ LANGUAGE_EXTENSIONS = {
     ".dart": "dart",
     ".cs": "csharp",
     ".c": "c",
-    ".h": "c",
+    ".h": "cpp",
     ".cpp": "cpp",
-    ".hpp": "cpp",
     ".cc": "cpp",
-    ".hh": "cpp",
     ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".hh": "cpp",
     ".hxx": "cpp",
     ".swift": "swift",
 }
@@ -394,39 +394,6 @@ C_SPEC = LanguageSpec(
 )
 
 
-# C++ specification
-CPP_SPEC = LanguageSpec(
-    ts_language="cpp",
-    symbol_node_types={
-        "function_definition": "function",
-        "class_specifier": "class",
-        "struct_specifier": "type",
-        "enum_specifier": "type",
-        "union_specifier": "type",
-        "type_definition": "type",
-    },
-    name_fields={
-        "function_definition": "declarator",
-        "class_specifier": "name",
-        "struct_specifier": "name",
-        "enum_specifier": "name",
-        "union_specifier": "name",
-        "type_definition": "declarator",
-    },
-    param_fields={
-        "function_definition": "declarator",
-    },
-    return_type_fields={
-        "function_definition": "type",
-    },
-    docstring_strategy="preceding_comment",
-    decorator_node_type=None,
-    container_node_types=["class_specifier", "struct_specifier"],
-    constant_patterns=["preproc_def"],
-    type_patterns=["type_definition", "enum_specifier", "struct_specifier", "union_specifier"],
-)
-
-
 # Swift specification
 # Note: tree-sitter-swift uses class_declaration for class/struct/enum/extension;
 # the declaration_kind child field ("class"/"struct"/"enum"/"extension") disambiguates
@@ -457,6 +424,49 @@ SWIFT_SPEC = LanguageSpec(
 )
 
 
+# C++ specification
+CPP_SPEC = LanguageSpec(
+    ts_language="cpp",
+    symbol_node_types={
+        "class_specifier": "class",
+        "struct_specifier": "type",
+        "union_specifier": "type",
+        "enum_specifier": "type",
+        "type_definition": "type",
+        "alias_declaration": "type",
+        "function_definition": "function",
+        "declaration": "function",
+        "field_declaration": "function",
+    },
+    name_fields={
+        "class_specifier": "name",
+        "struct_specifier": "name",
+        "union_specifier": "name",
+        "enum_specifier": "name",
+        "type_definition": "declarator",
+        "alias_declaration": "name",
+        "function_definition": "declarator",
+        "declaration": "declarator",
+        "field_declaration": "declarator",
+    },
+    param_fields={
+        "function_definition": "declarator",
+        "declaration": "declarator",
+        "field_declaration": "declarator",
+    },
+    return_type_fields={
+        "function_definition": "type",
+        "declaration": "type",
+        "field_declaration": "type",
+    },
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["class_specifier", "struct_specifier", "union_specifier"],
+    constant_patterns=["preproc_def"],
+    type_patterns=["class_specifier", "struct_specifier", "union_specifier", "enum_specifier", "type_definition", "alias_declaration"],
+)
+
+
 # Language registry
 LANGUAGE_REGISTRY = {
     "python": PYTHON_SPEC,
@@ -469,6 +479,6 @@ LANGUAGE_REGISTRY = {
     "dart": DART_SPEC,
     "csharp": CSHARP_SPEC,
     "c": C_SPEC,
-    "cpp": CPP_SPEC,
     "swift": SWIFT_SPEC,
+    "cpp": CPP_SPEC,
 }
