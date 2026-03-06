@@ -775,6 +775,113 @@ def test_parse_cpp():
     assert any(i.endswith("~2") for i in add_ids)
 
 
+ELIXIR_SOURCE = '''
+defmodule MyApp.Calculator do
+  @moduledoc """
+  A simple calculator module.
+  """
+
+  @type result :: {:ok, number()} | {:error, String.t()}
+
+  @doc """
+  Adds two numbers together.
+  """
+  def add(a, b) do
+    a + b
+  end
+
+  @doc false
+  defp validate(x) when is_number(x) do
+    {:ok, x}
+  end
+
+  defmacro debug(expr) do
+    quote do: IO.inspect(unquote(expr))
+  end
+end
+
+defmodule MyApp.Types do
+  @type name :: String.t()
+  defguard is_positive(x) when is_number(x) and x > 0
+end
+
+defprotocol MyApp.Printable do
+  @callback render(term()) :: String.t()
+  def to_string(value)
+end
+
+defimpl MyApp.Printable, for: Integer do
+  def to_string(value), do: Integer.to_string(value)
+end
+'''
+
+
+def test_parse_elixir():
+    """Test Elixir parsing."""
+    symbols = parse_file(ELIXIR_SOURCE, "sample.ex", "elixir")
+
+    # Module
+    calc = next((s for s in symbols if s.name == "MyApp.Calculator"), None)
+    assert calc is not None
+    assert calc.kind == "class"
+    assert "simple calculator" in calc.docstring.lower()
+
+    # Method inside module (def)
+    add = next((s for s in symbols if s.name == "add"), None)
+    assert add is not None
+    assert add.kind == "method"
+    assert add.qualified_name == "MyApp.Calculator.add"
+    assert add.parent == calc.id
+    assert "Adds two numbers" in add.docstring
+
+    # Private method (defp)
+    validate = next((s for s in symbols if s.name == "validate"), None)
+    assert validate is not None
+    assert validate.kind == "method"
+    assert validate.qualified_name == "MyApp.Calculator.validate"
+
+    # Macro (defmacro)
+    macro = next((s for s in symbols if s.name == "debug"), None)
+    assert macro is not None
+    assert macro.kind == "method"
+
+    # Type alias (@type)
+    result_type = next((s for s in symbols if s.name == "result"), None)
+    assert result_type is not None
+    assert result_type.kind == "type"
+    assert result_type.qualified_name == "MyApp.Calculator.result"
+
+    # Guard (defguard in separate module)
+    guard = next((s for s in symbols if s.name == "is_positive"), None)
+    assert guard is not None
+    assert guard.kind == "method"
+    assert guard.qualified_name == "MyApp.Types.is_positive"
+
+    # @type in Types module
+    name_type = next((s for s in symbols if s.name == "name"), None)
+    assert name_type is not None
+    assert name_type.kind == "type"
+
+    # Protocol (defprotocol)
+    protocol = next((s for s in symbols if s.name == "MyApp.Printable"), None)
+    assert protocol is not None
+    assert protocol.kind == "type"
+
+    # @callback inside protocol
+    callback = next((s for s in symbols if s.name == "render"), None)
+    assert callback is not None
+    assert callback.kind == "type"
+
+    # Protocol implementation (defimpl)
+    impl = next((s for s in symbols if "Printable" in s.qualified_name and s.kind == "class"), None)
+    assert impl is not None
+
+    # Function inside impl
+    to_str = next((s for s in symbols if s.name == "to_string"), None)
+    assert to_str is not None
+    assert to_str.kind == "method"
+
+
 def test_parse_cpp_header_stays_cpp():
     """C++-style headers should stay in C++ mode."""
     symbols = parse_file(CPP_HEADER_SOURCE, "sample.h", "cpp")

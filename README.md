@@ -297,6 +297,7 @@ Every tool response includes a `_meta` envelope with timing, token savings, and 
 | C#         | `.cs`         | class, method, type, record             |
 | C          | `.c`          | function, type, constant                |
 | C++        | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx`, `.h`* | function, class, method, type, constant |
+| Elixir     | `.ex`, `.exs` | class (module/impl), type (protocol/@type/@callback), method, function |
 
 \* `.h` is parsed as C++ first, then falls back to C when no C++ symbols are extracted.
 

@@ -15,6 +15,7 @@
 | C#         | `.cs`         | tree-sitter-csharp     | class (class/record), method (method/constructor), type (interface/enum/struct/delegate) | `[Attribute]` | `/// <summary>` XML doc comments | Properties and `const` fields not indexed                          |
 | C          | `.c`          | tree-sitter-c          | function, type (struct/enum/union), constant | —             | `/* */` and `//` comments | `#define` macros extracted as constants; no class/method hierarchy |
 | C++        | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx`, `.h`* | tree-sitter-cpp | function, class, method, type (struct/enum/union/alias), constant | — | `/* */` and `//` comments | Namespace symbols are used for qualification but not emitted as standalone symbols |
+| Elixir     | `.ex`, `.exs` | tree-sitter-elixir | class (defmodule/defimpl), type (defprotocol/@type/@callback), method (def/defp/defmacro/defguard inside module), function (top-level def) | — | `@doc`/`@moduledoc` strings | Homoiconic grammar; custom walker required. `defstruct`, `use`, `import`, `alias` not indexed |
 
 \* `.h` uses C++ parsing first, then falls back to C when no C++ symbols are extracted.
 

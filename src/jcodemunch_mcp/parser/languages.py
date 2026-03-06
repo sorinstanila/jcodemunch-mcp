@@ -69,6 +69,8 @@ LANGUAGE_EXTENSIONS = {
     ".hh": "cpp",
     ".hxx": "cpp",
     ".swift": "swift",
+    ".ex": "elixir",
+    ".exs": "elixir",
 }
 
 
@@ -465,6 +467,25 @@ CPP_SPEC = LanguageSpec(
 )
 
 
+# Elixir specification
+# NOTE: Elixir's tree-sitter grammar is homoiconic — all constructs (defmodule,
+# def, defp, defmacro, @doc, @type, etc.) are represented as generic `call` or
+# `unary_operator` nodes. Custom extraction is performed in extractor.py via
+# _parse_elixir_symbols(); the fields below are intentionally empty.
+ELIXIR_SPEC = LanguageSpec(
+    ts_language="elixir",
+    symbol_node_types={},
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="elixir",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+)
+
+
 # Language registry
 LANGUAGE_REGISTRY = {
     "python": PYTHON_SPEC,
@@ -479,4 +500,5 @@ LANGUAGE_REGISTRY = {
     "c": C_SPEC,
     "swift": SWIFT_SPEC,
     "cpp": CPP_SPEC,
+    "elixir": ELIXIR_SPEC,
 }

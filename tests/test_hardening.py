@@ -410,6 +410,46 @@ int only_c(void) { int v[] = (int[]){1,2,3}; return v[0]; }
         assert method.kind == "method"
         assert "Box" in method.qualified_name
 
+    # -- Elixir ----------------------------------------------------------
+
+    def test_elixir_module(self):
+        content, fname = _fixture("elixir", "sample.ex")
+        symbols = parse_file(content, fname, "elixir")
+        mod = _by_name(symbols, "MyApp.Calculator")
+        assert mod.kind == "class"
+        assert mod.language == "elixir"
+
+    def test_elixir_method(self):
+        content, fname = _fixture("elixir", "sample.ex")
+        symbols = parse_file(content, fname, "elixir")
+        method = _by_name(symbols, "add")
+        assert method.kind == "method"
+        assert method.parent is not None
+
+    def test_elixir_private_function(self):
+        content, fname = _fixture("elixir", "sample.ex")
+        symbols = parse_file(content, fname, "elixir")
+        func = _by_name(symbols, "validate")
+        assert func.kind == "method"
+
+    def test_elixir_protocol(self):
+        content, fname = _fixture("elixir", "sample.ex")
+        symbols = parse_file(content, fname, "elixir")
+        proto = _by_name(symbols, "MyApp.Printable")
+        assert proto.kind == "type"
+
+    def test_elixir_type_attribute(self):
+        content, fname = _fixture("elixir", "sample.ex")
+        symbols = parse_file(content, fname, "elixir")
+        t = _by_name(symbols, "result")
+        assert t.kind == "type"
+
+    def test_elixir_qualified_names(self):
+        content, fname = _fixture("elixir", "sample.ex")
+        symbols = parse_file(content, fname, "elixir")
+        add = _by_name(symbols, "add")
+        assert add.qualified_name == "MyApp.Calculator.add"
+
 
 # ===========================================================================
 # 2. Overload Disambiguation
@@ -496,6 +536,7 @@ class TestDeterminism:
         ("csharp", "sample.cs"),
         ("c", "sample.c"),
         ("cpp", "sample.cpp"),
+        ("elixir", "sample.ex"),
     ])
     def test_deterministic_ids_and_hashes(self, language, filename):
         content, fname = _fixture(language, filename)
