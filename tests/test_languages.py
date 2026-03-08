@@ -1444,9 +1444,8 @@ def test_parse_vue_ts():
     """Test Vue SFC parsing with TypeScript script block (lang="ts")."""
     symbols = parse_file(VUE_TS_SOURCE, "User.vue", "vue")
 
-    iface = next((s for s in symbols if s.name == "User"), None)
+    iface = next((s for s in symbols if s.name == "User" and s.kind == "type"), None)
     assert iface is not None
-    assert iface.kind == "type"
     assert iface.language == "vue"
 
     fn = next((s for s in symbols if s.name == "getName"), None)
@@ -1816,3 +1815,118 @@ def test_fortran_extension_mapping():
     from jcodemunch_mcp.parser.languages import get_language_for_path
     for ext in (".f90", ".f95", ".f03", ".f08", ".f", ".for", ".fpp"):
         assert get_language_for_path(f"code{ext}") == "fortran", ext
+
+
+# ---------------------------------------------------------------------------
+# Vue SFC
+# ---------------------------------------------------------------------------
+
+VUE_COMPOSITION_SOURCE = """\
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+
+// Current count
+const count = ref(0)
+const doubled = computed(() => count.value * 2)
+const props = defineProps<{ title: string; max?: number }>()
+const emit = defineEmits(['update'])
+
+function increment() {
+  count.value++
+  emit('update', count.value)
+}
+
+function reset() {
+  count.value = 0
+}
+</script>
+<template><div>{{ count }}</div></template>
+"""
+
+VUE_OPTIONS_SOURCE = """\
+<script>
+export default {
+  props: { items: Array, loading: Boolean },
+  data() { return { selected: null } },
+  computed: {
+    count() { return this.items.length },
+    hasItems() { return this.count > 0 }
+  },
+  methods: {
+    select(item) { this.selected = item },
+    clear() { this.selected = null }
+  }
+}
+</script>
+<template><div/></template>
+"""
+
+
+def test_vue_composition_component_symbol():
+    """Component name extracted from filename as class symbol."""
+    syms = parse_file(VUE_COMPOSITION_SOURCE, "Counter.vue", "vue")
+    comp = [s for s in syms if s.kind == "class" and s.name == "Counter"]
+    assert len(comp) == 1
+    assert comp[0].line == 1
+
+
+def test_vue_composition_ref_captured():
+    """ref() declarations captured as constants."""
+    syms = parse_file(VUE_COMPOSITION_SOURCE, "Counter.vue", "vue")
+    names = [s.name for s in syms if s.kind == "constant"]
+    assert "count" in names
+    assert "doubled" in names
+
+
+def test_vue_composition_define_macros():
+    """defineProps and defineEmits captured as constants."""
+    syms = parse_file(VUE_COMPOSITION_SOURCE, "Counter.vue", "vue")
+    names = [s.name for s in syms if s.kind == "constant"]
+    assert "props" in names
+    assert "emit" in names
+
+
+def test_vue_composition_functions():
+    """Function declarations captured with correct line numbers."""
+    syms = parse_file(VUE_COMPOSITION_SOURCE, "Counter.vue", "vue")
+    funcs = {s.name: s for s in syms if s.kind == "function"}
+    assert "increment" in funcs
+    assert "reset" in funcs
+    assert funcs["increment"].line > 1
+
+
+def test_vue_composition_parent_relationship():
+    """All symbols have the component as parent."""
+    syms = parse_file(VUE_COMPOSITION_SOURCE, "Counter.vue", "vue")
+    comp = next(s for s in syms if s.kind == "class")
+    children = [s for s in syms if s.parent == comp.id]
+    assert len(children) >= 4
+
+
+def test_vue_options_methods():
+    """Options API methods extracted as method symbols."""
+    syms = parse_file(VUE_OPTIONS_SOURCE, "MyList.vue", "vue")
+    methods = {s.name for s in syms if s.kind == "method"}
+    assert "select" in methods
+    assert "clear" in methods
+
+
+def test_vue_options_computed():
+    """Options API computed properties extracted as method symbols."""
+    syms = parse_file(VUE_OPTIONS_SOURCE, "MyList.vue", "vue")
+    computed = {s.name for s in syms if s.kind == "method"}
+    assert "count" in computed
+    assert "hasItems" in computed
+
+
+def test_vue_options_props():
+    """Options API props captured as constant."""
+    syms = parse_file(VUE_OPTIONS_SOURCE, "MyList.vue", "vue")
+    props = [s for s in syms if s.name == "props" and s.kind == "constant"]
+    assert len(props) == 1
+
+
+def test_vue_extension_mapping():
+    """.vue extension maps to vue language."""
+    from jcodemunch_mcp.parser.languages import get_language_for_path
+    assert get_language_for_path("src/components/Counter.vue") == "vue"

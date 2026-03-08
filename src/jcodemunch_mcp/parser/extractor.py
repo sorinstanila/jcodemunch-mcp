@@ -2165,31 +2165,49 @@ def _extract_nix_binding(node, source_bytes: bytes, filename: str, symbols: list
 def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Extract symbols from Vue Single-File Components (.vue).
 
-    Locates the <script> or <script setup> block using the tree-sitter Vue
-    grammar, determines whether it is JavaScript or TypeScript (via the
-    lang="ts" attribute), then re-parses the raw script content with the
-    appropriate JS/TS spec.  Line numbers are offset to match positions in
-    the original .vue file.
+    Handles both Composition API (<script setup>) and Options API (<script>):
+
+    Composition API:
+      - Component name from filename (kind=class)
+      - function declarations → kind=function
+      - const X = ref/reactive/computed/watch... → kind=constant
+      - const props = defineProps() / defineEmits() / defineExpose() → kind=constant
+      - Preceding // or /* */ comments as docstrings
+
+    Options API:
+      - Component name from filename (kind=class)
+      - methods: { X() } → kind=method
+      - computed: { X() } → kind=method
+      - props: [...] or props: {} → kind=constant (group)
+      - data() → kind=function
+
+    Line numbers are offset to match positions in the original .vue file.
     """
+    from pathlib import Path as _Path
     from tree_sitter_language_pack import get_parser as _get_parser
+
     vue_parser = _get_parser("vue")
     tree = vue_parser.parse(source_bytes)
 
     # Find the first <script> or <script setup> element
     script_node = None
+    is_setup = False
     for child in tree.root_node.children:
         if child.type == "script_element":
             script_node = child
+            # Detect <script setup>
+            start_tag = next((c for c in child.children if c.type == "start_tag"), None)
+            if start_tag:
+                tag_text = source_bytes[start_tag.start_byte:start_tag.end_byte].decode("utf-8", errors="replace")
+                is_setup = "setup" in tag_text
             break
 
     if script_node is None:
         return []
 
-    # Detect language from start_tag attributes (lang="ts" / lang="tsx")
+    # Detect script language (default: javascript)
     lang = "javascript"
-    start_tag = script_node.child_by_field_name("start_tag") or next(
-        (c for c in script_node.children if c.type == "start_tag"), None
-    )
+    start_tag = next((c for c in script_node.children if c.type == "start_tag"), None)
     if start_tag:
         for attr in start_tag.children:
             if attr.type == "attribute":
@@ -2201,23 +2219,278 @@ def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     lang = "tsx"
                     break
 
-    # Extract raw_text content and its line offset within the .vue file
+    # Extract raw_text and its byte/line offset within the .vue file
     raw_node = next((c for c in script_node.children if c.type == "raw_text"), None)
     if raw_node is None:
         return []
 
-    script_content = source_bytes[raw_node.start_byte:raw_node.end_byte]
-    line_offset = raw_node.start_point[0]  # 0-based line of script content start
+    script_bytes = source_bytes[raw_node.start_byte:raw_node.end_byte]
+    line_offset = raw_node.start_point[0]  # rows are 0-based
 
-    # Parse the script block with the JS/TS spec
-    spec = LANGUAGE_REGISTRY[lang]
-    symbols = _parse_with_spec(script_content, filename, lang, spec)
+    # Component name from filename (Vue convention: filename = component name)
+    component_name = _Path(filename).stem
+    symbols: list[Symbol] = []
 
-    # Adjust line numbers to be relative to the .vue file
-    for sym in symbols:
-        sym.line = sym.line + line_offset
-        sym.end_line = sym.end_line + line_offset
-        sym.language = "vue"
+    # Synthetic component symbol (kind=class, line=1)
+    comp_sym = Symbol(
+        id=make_symbol_id(filename, component_name, "class"),
+        name=component_name,
+        qualified_name=component_name,
+        kind="class",
+        language="vue",
+        file=filename,
+        line=1,
+        end_line=source_bytes.count(b"\n") + 1,
+        signature=f"component {component_name}",
+        docstring="",
+        summary="",
+    )
+    symbols.append(comp_sym)
+
+    # Re-parse script content with the JS/TS parser
+    sub_parser = _get_parser(lang if lang != "tsx" else "typescript")
+    sub_tree = sub_parser.parse(script_bytes)
+
+    # Vue Composition API reactive primitives and macros
+    _VUE_REACTIVE = frozenset({
+        "ref", "reactive", "computed", "watch", "watchEffect",
+        "readonly", "shallowRef", "shallowReactive", "toRef", "toRefs",
+        "defineProps", "defineEmits", "defineExpose", "defineModel",
+        "useRoute", "useRouter", "useStore",
+    })
+
+    def _node_text(n) -> str:
+        return script_bytes[n.start_byte:n.end_byte].decode("utf-8", errors="replace")
+
+    def _preceding_comment(n) -> str:
+        """Return preceding // or /* */ comment text as docstring."""
+        # Walk backwards in parent's children list
+        parent = n.parent
+        if parent is None:
+            return ""
+        prev = None
+        for c in parent.children:
+            if c.id == n.id:
+                break
+            if c.type in ("comment", "template_substitution"):
+                prev = c
+            elif c.type not in (",", "\n", " "):
+                prev = None
+        if prev and prev.type == "comment":
+            txt = _node_text(prev).strip()
+            return txt.lstrip("/").lstrip("*").strip()
+        return ""
+
+    def _adjusted_line(n) -> int:
+        return n.start_point[0] + line_offset + 1  # 1-based
+
+    def _adjusted_end_line(n) -> int:
+        return n.end_point[0] + line_offset + 1
+
+    def _is_vue_reactive_call(node) -> bool:
+        """Return True if node is a call_expression to a Vue reactive function."""
+        if node.type not in ("call_expression", "await_expression"):
+            return False
+        func = node.child_by_field_name("function") or (node.children[0] if node.children else None)
+        if func is None:
+            return False
+        name = _node_text(func).split("(")[0].split("<")[0]
+        return name in _VUE_REACTIVE
+
+    def _walk_composition(node, parent_id: Optional[str] = None):
+        """Walk script AST for Composition API symbols."""
+        if node.type == "class_declaration":
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                name = _node_text(name_node)
+                sym = Symbol(
+                    id=make_symbol_id(filename, name, "class"),
+                    name=name,
+                    qualified_name=name,
+                    kind="class",
+                    language="vue",
+                    file=filename,
+                    line=_adjusted_line(node),
+                    end_line=_adjusted_end_line(node),
+                    signature=f"class {name}",
+                    docstring=_preceding_comment(node),
+                    summary="",
+                    parent=comp_sym.id,
+                )
+                symbols.append(sym)
+            return  # don't recurse into class body
+
+        elif node.type == "function_declaration":
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                name = _node_text(name_node)
+                params = node.child_by_field_name("parameters")
+                ret = node.child_by_field_name("return_type")
+                sig = f"function {name}{_node_text(params) if params else '()'}"
+                if ret:
+                    sig += _node_text(ret)
+                sym = Symbol(
+                    id=make_symbol_id(filename, name, "function"),
+                    name=name,
+                    qualified_name=f"{component_name}.{name}",
+                    kind="function",
+                    language="vue",
+                    file=filename,
+                    line=_adjusted_line(node),
+                    end_line=_adjusted_end_line(node),
+                    signature=sig,
+                    docstring=_preceding_comment(node),
+                    summary="",
+                    parent=comp_sym.id,
+                )
+                symbols.append(sym)
+
+        elif node.type in ("interface_declaration", "type_alias_declaration", "enum_declaration"):
+            # TypeScript type-level declarations
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                name = _node_text(name_node)
+                sym = Symbol(
+                    id=make_symbol_id(filename, name, "type"),
+                    name=name,
+                    qualified_name=name,
+                    kind="type",
+                    language="vue",
+                    file=filename,
+                    line=_adjusted_line(node),
+                    end_line=_adjusted_end_line(node),
+                    signature=_node_text(node).split("{")[0].strip(),
+                    docstring=_preceding_comment(node),
+                    summary="",
+                    parent=comp_sym.id,
+                )
+                symbols.append(sym)
+            return
+
+        elif node.type in ("lexical_declaration", "variable_declaration"):
+            # const/let declarations — capture Vue reactive + macro calls
+            for decl in node.children:
+                if decl.type != "variable_declarator":
+                    continue
+                name_node = decl.child_by_field_name("name")
+                val_node = decl.child_by_field_name("value")
+                if name_node is None:
+                    continue
+                name = _node_text(name_node)
+                if not name.isidentifier():
+                    continue
+                # Only capture if RHS is a Vue reactive/macro call
+                if val_node and _is_vue_reactive_call(val_node):
+                    sig = _node_text(node).split("\n")[0].rstrip("{").strip()
+                    sym = Symbol(
+                        id=make_symbol_id(filename, name, "constant"),
+                        name=name,
+                        qualified_name=f"{component_name}.{name}",
+                        kind="constant",
+                        language="vue",
+                        file=filename,
+                        line=_adjusted_line(decl),
+                        end_line=_adjusted_end_line(decl),
+                        signature=sig,
+                        docstring=_preceding_comment(node),
+                        summary="",
+                        parent=comp_sym.id,
+                    )
+                    symbols.append(sym)
+
+        # Recurse (but not into function bodies to avoid inner helpers)
+        skip_recurse = node.type in ("function_declaration", "arrow_function", "function")
+        if not skip_recurse:
+            for child in node.children:
+                _walk_composition(child, parent_id)
+
+    def _walk_options(node):
+        """Walk script AST for Options API export default { ... }."""
+        # Find: export_statement > object (the options object)
+        if node.type == "export_statement":
+            for c in node.children:
+                if c.type in ("object", "call_expression"):
+                    _extract_options_object(c)
+            return
+        for child in node.children:
+            _walk_options(child)
+
+    def _extract_options_object(obj_node):
+        """Extract methods/computed/props/data from Options API object."""
+        for pair in obj_node.children:
+            if pair.type != "pair":
+                continue
+            key_node = pair.child_by_field_name("key")
+            val_node = pair.child_by_field_name("value")
+            if key_node is None or val_node is None:
+                continue
+            key = _node_text(key_node).strip("\"'")
+
+            if key in ("methods", "computed") and val_node.type == "object":
+                for method_pair in val_node.children:
+                    if method_pair.type in ("pair", "method_definition"):
+                        mkey = method_pair.child_by_field_name("key") or method_pair.child_by_field_name("name")
+                        if mkey:
+                            mname = _node_text(mkey).strip("\"'")
+                            sym = Symbol(
+                                id=make_symbol_id(filename, mname, "method"),
+                                name=mname,
+                                qualified_name=f"{component_name}.{mname}",
+                                kind="method",
+                                language="vue",
+                                file=filename,
+                                line=_adjusted_line(method_pair),
+                                end_line=_adjusted_end_line(method_pair),
+                                signature=f"{key}.{mname}()",
+                                docstring=_preceding_comment(method_pair),
+                                summary="",
+                                parent=comp_sym.id,
+                            )
+                            symbols.append(sym)
+
+            elif key == "props":
+                sym = Symbol(
+                    id=make_symbol_id(filename, "props", "constant"),
+                    name="props",
+                    qualified_name=f"{component_name}.props",
+                    kind="constant",
+                    language="vue",
+                    file=filename,
+                    line=_adjusted_line(pair),
+                    end_line=_adjusted_end_line(pair),
+                    signature=f"props: {_node_text(val_node)[:60]}",
+                    docstring="",
+                    summary="",
+                    parent=comp_sym.id,
+                )
+                symbols.append(sym)
+
+            elif key == "data" and val_node.type in ("function", "arrow_function"):
+                sym = Symbol(
+                    id=make_symbol_id(filename, "data", "function"),
+                    name="data",
+                    qualified_name=f"{component_name}.data",
+                    kind="function",
+                    language="vue",
+                    file=filename,
+                    line=_adjusted_line(pair),
+                    end_line=_adjusted_end_line(pair),
+                    signature="data()",
+                    docstring=_preceding_comment(pair),
+                    summary="",
+                    parent=comp_sym.id,
+                )
+                symbols.append(sym)
+
+    # Dispatch to appropriate extractor
+    if is_setup:
+        _walk_composition(sub_tree.root_node)
+    else:
+        # Options API or plain script — try options first, fallback to composition walk
+        _walk_options(sub_tree.root_node)
+        if len(symbols) == 1:  # only component sym found → try composition
+            _walk_composition(sub_tree.root_node)
+
     return symbols
 
 
