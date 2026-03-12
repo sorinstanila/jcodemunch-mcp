@@ -57,6 +57,7 @@ class CodeIndex:
     source_root: str = ""        # Absolute source root for local indexes, empty for remote
     file_languages: dict[str, str] = field(default_factory=dict)  # file_path -> language
     display_name: str = ""       # User-facing name (for local hashed repo IDs)
+    imports: Optional[dict[str, list[dict]]] = None  # file_path -> [{specifier, names}]; None = not indexed yet (pre-v1.3.0)
 
     def __post_init__(self) -> None:
         if not self.display_name:
@@ -288,6 +289,7 @@ class IndexStore:
         source_root: str = "",
         file_languages: Optional[dict[str, str]] = None,
         display_name: str = "",
+        imports: Optional[dict[str, list[dict]]] = None,
     ) -> "CodeIndex":
         """Save index and raw files to storage."""
         normalized_source_files = sorted(dict.fromkeys(source_files or list(raw_files.keys())))
@@ -319,6 +321,7 @@ class IndexStore:
             source_root=source_root,
             file_languages=merged_file_languages,
             display_name=display_name or name,
+            imports=imports if imports is not None else {},
         )
 
         # Save index JSON atomically: write to temp then rename
@@ -391,6 +394,7 @@ class IndexStore:
             source_root=data.get("source_root", ""),
             file_languages=file_languages,
             display_name=data.get("display_name", stored_name),
+            imports=data["imports"] if "imports" in data else None,
         )
 
     def get_symbol_content(self, owner: str, name: str, symbol_id: str, _index: Optional["CodeIndex"] = None) -> Optional[str]:
@@ -477,6 +481,7 @@ class IndexStore:
         git_head: str = "",
         file_summaries: Optional[dict[str, str]] = None,
         file_languages: Optional[dict[str, str]] = None,
+        imports: Optional[dict[str, list[dict]]] = None,
     ) -> Optional[CodeIndex]:
         """Incrementally update an existing index.
 
@@ -536,6 +541,16 @@ class IndexStore:
         if file_summaries:
             merged_summaries.update(file_summaries)
 
+        # Merge import graph: keep existing, remove deleted, update changed/new
+        # index.imports is None for pre-v1.3.0 indexes; use {} as base if so
+        merged_imports = dict(index.imports) if index.imports is not None else {}
+        for f in deleted_files:
+            merged_imports.pop(f, None)
+        for f in changed_files:
+            merged_imports.pop(f, None)
+        if imports:
+            merged_imports.update(imports)
+
         # Build updated index
         updated_source_files = sorted(old_files)
         updated = CodeIndex(
@@ -553,6 +568,7 @@ class IndexStore:
             source_root=index.source_root,
             file_languages={fp: merged_file_languages[fp] for fp in updated_source_files if fp in merged_file_languages},
             display_name=index.display_name,
+            imports=merged_imports,
         )
 
         # Save atomically
@@ -677,4 +693,5 @@ class IndexStore:
             "source_root": index.source_root,
             "file_languages": index.file_languages,
             "display_name": index.display_name,
+            **({} if index.imports is None else {"imports": index.imports}),
         }
