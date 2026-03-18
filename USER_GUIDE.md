@@ -471,6 +471,7 @@ These IDs stay stable across re-indexing as long as path, qualified name, and ki
 | ------------------ | ------------------------- | ------------------------------------------------------------------ |
 | `index_repo`       | Index a GitHub repository | `url`, `use_ai_summaries`                                          |
 | `index_folder`     | Index a local folder      | `path`, `extra_ignore_patterns`, `follow_symlinks`                 |
+| `index_file`       | Re-index a single file    | `path`, `use_ai_summaries`, `context_providers`                    |
 | `list_repos`       | List indexed repos        | —                                                                  |
 | `get_file_tree`    | Browse file structure     | `repo`, `path_prefix`                                              |
 | `get_file_outline` | Show symbols in a file    | `repo`, `file_path`                                                |

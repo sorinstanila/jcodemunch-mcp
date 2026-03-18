@@ -92,6 +92,7 @@ You can also add the same block to a project-level `CLAUDE.md` in your repo root
 |------|------|
 | Index a local project | `index_folder { "path": "/your/project" }` |
 | Index a GitHub repo | `index_repo { "url": "owner/repo" }` |
+| Re-index one file after editing | `index_file { "path": "/your/project/src/foo.py" }` |
 | Find a function by name | `search_symbols { "repo": "...", "query": "funcName" }` |
 | Read a specific function | `get_symbol { "repo": "...", "symbol_id": "..." }` |
 | See all files + structure | `get_repo_outline { "repo": "..." }` |
@@ -114,7 +115,10 @@ You can also add the same block to a project-level `CLAUDE.md` in your repo root
 **30% more tokens than without it**
 → The agent is using jCodeMunch *in addition to* native file tools, not *instead of* them. The `CLAUDE.md` policy in Step 3 is the fix.
 
-**Index seems stale**
+**Index seems stale for one file**
+→ Call `index_file { "path": "/absolute/path/to/file" }` to re-index just that file instantly.
+
+**Index seems stale across the whole project**
 → Re-run `index_folder` with `incremental: false` to force a full rebuild, or call `invalidate_cache`.
 
 ---

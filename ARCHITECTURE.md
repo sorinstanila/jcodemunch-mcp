@@ -435,6 +435,7 @@ The tool surface is best described by capability domain rather than by a fixed c
 
 * `index_repo`
 * `index_folder`
+* `index_file`
 * `list_repos`
 * `invalidate_cache`
 

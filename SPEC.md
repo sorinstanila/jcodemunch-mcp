@@ -116,6 +116,28 @@ Indexes a local project folder using the same parsing and persistence model as r
 
 ---
 
+#### `index_file` — Re-index a single file
+
+```json
+{
+  "path": "/absolute/path/to/file.py",
+  "use_ai_summaries": false,
+  "context_providers": true
+}
+```
+
+Re-indexes a single file without touching the rest of the index. Locates the owning index by scanning `source_root` of all indexed repos and selecting the most specific match. Exits early if the file's hash is unchanged.
+
+**Behavioral notes:**
+
+* requires the file's parent folder to already be indexed via `index_folder`
+* validates security (path must be within a known `source_root`)
+* checks mtime and hash — skips parse/save if file is unchanged
+* parses with tree-sitter, runs context providers, and writes a surgical incremental update
+* faster than re-running `index_folder` for single-file edits
+
+---
+
 #### `invalidate_cache` — Delete index for a repository
 
 ```json

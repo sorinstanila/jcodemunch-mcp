@@ -5,6 +5,8 @@ All notable changes to jcodemunch-mcp are documented here.
 ## [Unreleased]
 
 ### Added
+- **`index_file` tool** (PR #126, credit: @thellMa) — re-index a single file instantly after editing. Locates the correct index by scanning `source_root` of all indexed repos (picks most specific match), validates security, computes hash + mtime, and exits early if the file is unchanged. Parses with tree-sitter, runs context providers, and calls `incremental_save()` for a surgical single-file update. Registered as a new MCP tool with `path`, `use_ai_summaries`, and `context_providers` parameters.
+- **mtime optimization** (PR #126, credit: @thellMa) — `index_folder` and `index_repo` now check file modification time (`st_mtime_ns`) before reading or hashing. Files with unchanged mtimes are skipped entirely; hashes are computed lazily only for files whose mtime changed. Indexes store a `file_mtimes` dict; old indexes without mtime data fall back to hash-all for backward compatibility.
 - **`watch-claude` CLI subcommand** — auto-discover and watch Claude Code worktrees via two complementary modes:
   - **Hook-driven mode** (recommended): install `WorktreeCreate`/`WorktreeRemove` hooks that call `jcodemunch-mcp hook-event create|remove`. Events are written to `~/.claude/jcodemunch-worktrees.jsonl` and `watch-claude` reacts instantly via filesystem watch.
   - **`--repos` mode**: `jcodemunch-mcp watch-claude --repos ~/project1 ~/project2` polls `git worktree list --porcelain` and filters for Claude-created worktrees (branches matching `claude/*` or `worktree-*`).
@@ -12,6 +14,7 @@ All notable changes to jcodemunch-mcp are documented here.
 - **`hook-event` CLI subcommand** — `jcodemunch-mcp hook-event create|remove` reads Claude Code's hook JSON from stdin and appends to the JSONL manifest. Designed to be called from Claude Code's `WorktreeCreate`/`WorktreeRemove` hooks.
 
 ### Changed
+- **Shared indexing pipeline** (PR #126, credit: @thellMa) — new `_indexing_pipeline.py` consolidates logic previously duplicated across `index_folder`, `index_repo`, and the new `index_file`: `file_languages_for_paths()`, `language_counts()`, `complete_file_summaries()`, `parse_and_prepare_incremental()`, and `parse_and_prepare_full()`. All three tools now call the shared pipeline functions.
 - `main()` subcommand set expanded to include `hook-event` and `watch-claude`.
 
 ## [1.7.2] - 2026-03-17
