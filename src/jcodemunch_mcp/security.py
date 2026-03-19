@@ -5,6 +5,43 @@ from pathlib import Path
 from typing import Optional
 
 
+# --- Package Integrity Check ---
+
+def verify_package_integrity() -> None:
+    """Warn at startup if this code is running from an unofficial distribution.
+
+    Detects supply-chain attacks where the package is re-published under a
+    different name (e.g. jcodemunch-mcp-fork instead of jcodemunch-mcp).
+    Uses packages_distributions() to find which distribution actually owns
+    the running code — catches renamed forks that install under a different name.
+    """
+    import sys
+
+    expected_dist = "jcodemunch-mcp"
+    canonical_url = "https://github.com/jgravelle/jcodemunch-mcp"
+
+    try:
+        from importlib.metadata import packages_distributions
+
+        distributions = packages_distributions().get("jcodemunch_mcp", [])
+        if not distributions:
+            # Running from source / editable install without dist metadata — skip.
+            return
+
+        actual_dist = distributions[0]
+        if actual_dist != expected_dist:
+            print(
+                f"\nSECURITY WARNING: jcodemunch_mcp is running from distribution "
+                f"'{actual_dist}' instead of the official '{expected_dist}'.\n"
+                f"This may indicate a supply-chain attack or unofficial fork.\n"
+                f"Install only from PyPI: pip install {expected_dist}\n"
+                f"Official source: {canonical_url}\n",
+                file=sys.stderr,
+            )
+    except Exception:
+        pass  # Never block startup due to integrity check errors
+
+
 # --- Path Traversal & Symlink Protection ---
 
 def validate_path(root: Path, target: Path) -> bool:

@@ -1144,6 +1144,9 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 def main(argv: Optional[list[str]] = None):
     """Main entry point."""
+    from .security import verify_package_integrity
+    verify_package_integrity()
+
     parser = argparse.ArgumentParser(
         prog="jcodemunch-mcp",
         description="jCodeMunch MCP server and tools.",
