@@ -22,7 +22,7 @@ from .tools.invalidate_cache import invalidate_cache
 logger = logging.getLogger(__name__)
 
 # Default debounce in milliseconds
-DEFAULT_DEBOUNCE_MS = 2000
+DEFAULT_DEBOUNCE_MS = 200
 
 
 class WatcherError(Exception):
