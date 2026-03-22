@@ -24,14 +24,18 @@ _FIELD_REPS = {"name": 3, "keywords": 2, "signature": 2, "summary": 1, "docstrin
 # Centrality: log-scaled bonus for symbols in frequently-imported files (tiebreaker only)
 _CENTRALITY_WEIGHT = 0.3
 
+# Pre-compiled regexes for _tokenize (called ~9000× on cold BM25 build)
+_CAMEL_RE = re.compile(r"([a-z])([A-Z])")
+_TOKEN_RE = re.compile(r"[a-zA-Z0-9]{2,}")
+
 
 def _tokenize(text: str) -> list[str]:
     """Split camelCase / snake_case text into lowercase tokens."""
     if not text:
         return []
     # Insert separator before each uppercase letter that follows a lowercase letter
-    text = re.sub(r"([a-z])([A-Z])", r"\1_\2", text)
-    return [t.lower() for t in re.findall(r"[a-zA-Z0-9]+", text) if len(t) > 1]
+    text = _CAMEL_RE.sub(r"\1_\2", text)
+    return [t.lower() for t in _TOKEN_RE.findall(text)]
 
 
 def _sym_tokens(sym: dict) -> list[str]:

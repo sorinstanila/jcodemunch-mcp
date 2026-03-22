@@ -1020,18 +1020,33 @@ class SQLiteIndexStore:
         from .index_store import CodeIndex
 
         symbols = [self._row_to_symbol_dict(r) for r in symbol_rows]
-        source_files = sorted(r["path"] for r in file_rows)
-        file_hashes = {r["path"]: r["hash"] for r in file_rows if r["hash"]}
-        file_mtimes = {r["path"]: r["mtime_ns"] for r in file_rows if r["mtime_ns"] is not None}
-        file_languages = {r["path"]: r["language"] for r in file_rows if r["language"]}
-        file_summaries = {r["path"]: r["summary"] for r in file_rows if r["summary"]}
-        file_blob_shas = {r["path"]: r["blob_sha"] for r in file_rows if r["blob_sha"]}
+
+        # Single pass over file_rows to build all file-level dicts
+        source_files_unsorted: list[str] = []
+        file_hashes: dict[str, str] = {}
+        file_mtimes: dict[str, int] = {}
+        file_languages: dict[str, str] = {}
+        file_summaries: dict[str, str] = {}
+        file_blob_shas: dict[str, str] = {}
         imports: Optional[dict[str, list[dict]]] = {}
         for r in file_rows:
+            p = r["path"]
+            source_files_unsorted.append(p)
+            if r["hash"]:
+                file_hashes[p] = r["hash"]
+            if r["mtime_ns"] is not None:
+                file_mtimes[p] = r["mtime_ns"]
+            if r["language"]:
+                file_languages[p] = r["language"]
+            if r["summary"]:
+                file_summaries[p] = r["summary"]
+            if r["blob_sha"]:
+                file_blob_shas[p] = r["blob_sha"]
             if r["imports"]:
                 parsed = json.loads(r["imports"])
                 if parsed:
-                    imports[r["path"]] = parsed
+                    imports[p] = parsed
+        source_files = sorted(source_files_unsorted)
         if not imports:
             # v3 format had no imports field — preserve None for backward compatibility
             index_version = int(meta.get("index_version", "0"))
