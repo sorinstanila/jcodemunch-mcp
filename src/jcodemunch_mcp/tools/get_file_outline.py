@@ -57,8 +57,8 @@ def _get_file_outline_single(
                 "tokens_saved": tokens_saved,
                 "total_tokens_saved": total_saved,
                 **cost_avoided(tokens_saved, total_saved),
+                "tip": "Tip: use file_paths=[...] to query multiple files in one call.",
             },
-            "_tip": "Tip: use file_paths=[...] to query multiple files in one call.",
         }
 
     # Build symbol tree
@@ -86,8 +86,8 @@ def _get_file_outline_single(
             "tokens_saved": tokens_saved,
             "total_tokens_saved": total_saved,
             **cost_avoided(tokens_saved, total_saved),
+            "tip": "Tip: use file_paths=[...] to query multiple files in one call.",
         },
-        "_tip": "Tip: use file_paths=[...] to query multiple files in one call.",
     }
 
 
@@ -104,8 +104,9 @@ def _get_file_outline_batch(
 
     for file_path in file_paths:
         result = _get_file_outline_single(file_path, index, owner, name, store, start)
-        # Strip _tip from batch results to keep them clean
-        result.pop("_tip", None)
+        # Strip tip from batch results to keep them clean
+        if "_meta" in result and "tip" in result["_meta"]:
+            del result["_meta"]["tip"]
         results.append(result)
 
     elapsed = (time.perf_counter() - start) * 1000

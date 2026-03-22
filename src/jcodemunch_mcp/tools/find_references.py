@@ -60,7 +60,8 @@ def _find_references_single(
         "_meta": {
             "timing_ms": round(elapsed, 1),
             "truncated": len(results) > max_results,
-            "tip": "For usage-site matching beyond imports, also try search_text or check_references.",
+            "tip": "Tip: use identifiers=[...] to query multiple identifiers in one call. "
+                   "For usage-site matching beyond imports, also try search_text or check_references.",
         },
     }
 

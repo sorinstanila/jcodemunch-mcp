@@ -57,6 +57,7 @@ def _find_importers_single(
     results.sort(key=lambda r: r["file"])
 
     elapsed = (time.perf_counter() - start) * 1000
+    truncated = len(results) > max_results
     return {
         "repo": f"{owner}/{name}",
         "file_path": file_path,
@@ -64,9 +65,12 @@ def _find_importers_single(
         "importers": results[:max_results],
         "_meta": {
             "timing_ms": round(elapsed, 1),
-            "truncated": len(results) > max_results,
+            "truncated": truncated,
+            "tip": "Tip: use file_paths=['{0}','...'] to query multiple files in one call.".format(file_path)
+            if truncated
+            else "Tip: use file_paths=['{0}','...'] to query multiple files in one call. "
+                 "For usage-site matching beyond imports, also try check_references.".format(file_path),
         },
-        "_tip": "Tip: use file_paths=['{0}','...'] to query multiple files in one call.".format(file_path),
     }
 
 
