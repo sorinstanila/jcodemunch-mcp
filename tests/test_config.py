@@ -19,3 +19,26 @@ class TestJSONCParser:
         text = '{"key": "value"} // comment'
         result = _strip_jsonc(text)
         assert result == '{"key": "value"} '
+
+    def test_strips_block_comments(self):
+        """Should strip /* */ block comments."""
+        text = '{"key" /* comment */: "value"}'
+        result = _strip_jsonc(text)
+        assert result == '{"key" : "value"}'
+
+    def test_strips_multiline_block_comments(self):
+        """Should strip multiline /* */ comments."""
+        text = '''{
+    "key": "value" /* this is
+    a multiline
+    comment */
+}'''
+        result = _strip_jsonc(text)
+        assert '"key"' in result
+        assert 'this is' not in result
+
+    def test_preserves_strings_with_comment_chars(self):
+        """Should not strip // or /* inside quoted strings."""
+        text = '{"url": "http://example.com", "note": "use /* here*/"}'
+        result = _strip_jsonc(text)
+        assert result == text  # Should be unchanged
