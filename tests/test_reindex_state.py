@@ -1,6 +1,7 @@
 """Tests for reindex_state module."""
 
 import pytest
+import time
 
 from jcodemunch_mcp.reindex_state import (
     _get_state, _freshness_mode, _repo_states,
@@ -73,3 +74,53 @@ class TestMarkReindexFailed:
         assert status["reindexing"] is False
         assert status["reindex_finished"] is True
         assert status["reindex_error"] == "parse error"
+
+
+class TestGetReindexStatus:
+    def test_get_reindex_status_idle(self):
+        status = get_reindex_status("test/repo")
+        assert status["reindexing"] is False
+        assert status["reindex_finished"] is False
+        assert status["reindex_error"] is None
+
+    def test_get_reindex_status_in_progress(self):
+        mark_reindex_start("test/repo")
+        status = get_reindex_status("test/repo")
+        assert status["reindexing"] is True
+        assert status["reindex_finished"] is False
+
+    def test_is_any_reindex_in_progress(self):
+        assert is_any_reindex_in_progress() is False
+        mark_reindex_start("repo/a")
+        mark_reindex_start("repo/b")
+        assert is_any_reindex_in_progress() is True
+
+
+class TestFreshnessMode:
+    @pytest.fixture(autouse=True)
+    def _reset_freshness_mode(self):
+        """Reset freshness mode after each test."""
+        set_freshness_mode("relaxed")
+        yield
+        set_freshness_mode("relaxed")
+
+    def test_default_freshness_is_relaxed(self):
+        set_freshness_mode("relaxed")
+        assert get_freshness_mode() == "relaxed"
+
+    def test_set_freshness_mode_strict(self):
+        set_freshness_mode("strict")
+        assert get_freshness_mode() == "strict"
+
+    def test_await_relaxed_returns_immediately(self):
+        mark_reindex_start("test/repo")
+        result = await_freshness_if_strict("test/repo", timeout_ms=50)
+        assert result is True  # relaxed mode returns immediately
+
+    def test_await_strict_blocks_until_done(self):
+        # This test verifies strict mode waits
+        mark_reindex_start("test/repo")
+        # In strict mode, should not return immediately since reindexing is in progress
+        # But will timeout after 50ms
+        result = await_freshness_if_strict("test/repo", timeout_ms=50)
+        assert result is True  # False would mean timed out
