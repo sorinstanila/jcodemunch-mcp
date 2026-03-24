@@ -18,6 +18,10 @@ from typing import TYPE_CHECKING, Callable, NamedTuple, Optional, cast
 from ..parser.symbols import Symbol
 from ..path_map import parse_path_map, remap
 
+# Cache of base_path strings that have already had mkdir called — avoids
+# a redundant CreateDirectoryW syscall on every tool call.
+_VERIFIED_PATHS: set[str] = set()
+
 if TYPE_CHECKING:
     from .index_store import CodeIndex
 
@@ -217,7 +221,10 @@ class SQLiteIndexStore:
             self.base_path = Path(base_path)
         else:
             self.base_path = Path.home() / ".code-index"
-        self.base_path.mkdir(parents=True, exist_ok=True)
+        _key = str(self.base_path)
+        if _key not in _VERIFIED_PATHS:
+            self.base_path.mkdir(parents=True, exist_ok=True)
+            _VERIFIED_PATHS.add(_key)
 
     # ── Connection helpers ──────────────────────────────────────────
 
@@ -934,12 +941,20 @@ class SQLiteIndexStore:
         """Path to raw content directory."""
         return self.base_path / self._repo_slug(owner, name)
 
+    # Cache of resolved content_dir paths — avoids repeated resolve() syscalls
+    # in search_text (called once per file in the repo) and search_symbols.
+    _resolved_content_dirs: dict[str, str] = {}
+
     def _safe_content_path(self, content_dir: Path, relative_path: str) -> Optional[Path]:
         """Resolve a content path and ensure it stays within content_dir."""
         try:
-            base = content_dir.resolve()
+            dir_key = str(content_dir)
+            base_str = self._resolved_content_dirs.get(dir_key)
+            if base_str is None:
+                base_str = str(content_dir.resolve())
+                self._resolved_content_dirs[dir_key] = base_str
             candidate = (content_dir / relative_path).resolve()
-            if os.path.commonpath([str(base), str(candidate)]) != str(base):
+            if os.path.commonpath([base_str, str(candidate)]) != base_str:
                 return None
             return candidate
         except (OSError, ValueError):

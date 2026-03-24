@@ -762,11 +762,15 @@ def index_folder(
                 warnings.append(f"Failed to read {abs_path}: {e}")
                 return None
 
+        _hash_file_cache: dict[str, str] = {}  # rel_path -> content
+
         def _hash_file(rel_path: str) -> str:
-            """Read and hash a single file on demand."""
+            """Read and hash a single file on demand; cache content for parse step."""
             abs_path = rel_path_map[rel_path]
             with open(abs_path, "r", encoding="utf-8", errors="replace", newline="") as f:
-                return _file_hash(f.read())
+                content = f.read()
+            _hash_file_cache[rel_path] = content
+            return _file_hash(content)
 
         # Incremental path: detect changes using mtime fast-path
         if incremental and existing_index is not None:
@@ -791,7 +795,8 @@ def index_folder(
             raw_files_subset: dict[str, str] = {}
             subset_hashes: dict[str, str] = {}
             for rel_path in files_to_parse:
-                content = _read_file(rel_path)
+                # Use content cached by _hash_file if available (avoids second read)
+                content = _hash_file_cache.pop(rel_path, None) or _read_file(rel_path)
                 if content is None:
                     continue
                 raw_files_subset[rel_path] = content
