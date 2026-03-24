@@ -1,7 +1,6 @@
 """Full-text search across indexed file contents."""
 
 import fnmatch as _fnmatch
-import os
 import re
 import time
 from typing import Optional
@@ -137,10 +136,7 @@ def search_text(
         if file_matches:
             results.append({"file": file_path, "matches": file_matches})
             response_bytes += len(file_path) + 20
-            try:
-                raw_bytes += os.path.getsize(full_path)
-            except OSError:
-                pass
+            raw_bytes += index.file_sizes.get(file_path, 0)
 
         if truncated:
             break

@@ -2,7 +2,6 @@
 
 import heapq
 import math
-import os
 import re
 import time
 from fnmatch import fnmatch
@@ -337,15 +336,11 @@ def search_symbols(
     raw_bytes = 0
     seen_files: set = set()
     response_bytes = 0
-    content_dir = store._content_dir(owner, name)
     for entry in scored_results:
         f = entry["file"]
         if f not in seen_files:
             seen_files.add(f)
-            try:
-                raw_bytes += os.path.getsize(content_dir / f)
-            except OSError:
-                pass
+            raw_bytes += index.file_sizes.get(f, 0)
         response_bytes += entry["byte_length"]
     tokens_saved = estimate_savings(raw_bytes, response_bytes)
     total_saved = record_savings(tokens_saved, tool_name="search_symbols")

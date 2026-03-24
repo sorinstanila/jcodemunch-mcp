@@ -21,7 +21,7 @@ from .sqlite_store import SQLiteIndexStore, _VERIFIED_PATHS
 logger = logging.getLogger(__name__)
 
 # Bump this when the index schema changes in an incompatible way.
-INDEX_VERSION = 5
+INDEX_VERSION = 6
 
 
 @functools.lru_cache(maxsize=16)
@@ -83,6 +83,7 @@ class CodeIndex:
     context_metadata: dict = field(default_factory=dict)  # Provider metadata (e.g., dbt_columns)
     file_blob_shas: dict[str, str] = field(default_factory=dict)  # file_path -> GitHub blob SHA (remote repos only)
     file_mtimes: dict[str, int] = field(default_factory=dict)  # file_path -> os.stat().st_mtime_ns
+    file_sizes: dict[str, int] = field(default_factory=dict)   # file_path -> size in bytes (UTF-8 encoded)
 
     def __post_init__(self) -> None:
         if not self.display_name:
