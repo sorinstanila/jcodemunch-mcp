@@ -162,6 +162,8 @@ def discover_local_files(
     root = folder_path.resolve()
 
     skip_counts: dict[str, int] = {
+        "skip_dir": 0,
+        "skip_file": 0,
         "symlink": 0,
         "symlink_escape": 0,
         "path_traversal": 0,
@@ -198,7 +200,19 @@ def discover_local_files(
 
     for dirpath, dirnames, filenames in os.walk(str(root), followlinks=False):
         # Prune directories that should always be skipped before descending.
-        dirnames[:] = [d for d in dirnames if not SKIP_DIRS_REGEX.match(d)]
+        pruned = []
+        kept = []
+        for d in dirnames:
+            if SKIP_DIRS_REGEX.match(d):
+                pruned.append(d)
+            else:
+                kept.append(d)
+        if pruned:
+            rel_dir = os.path.relpath(dirpath, root_str)
+            for d in pruned:
+                skip_counts["skip_dir"] += 1
+                logger.debug("SKIP skip_dir: %s", os.path.join(rel_dir, d))
+        dirnames[:] = kept
         dpath = Path(dirpath)
 
         # Load .gitignore for this directory BEFORE filtering its files so
@@ -214,6 +228,8 @@ def discover_local_files(
 
         for filename in filenames:
             if SKIP_FILES_REGEX.search(filename):
+                skip_counts["skip_file"] += 1
+                logger.debug("SKIP skip_file: %s", os.path.join(os.path.relpath(dirpath, root_str), filename))
                 continue
             file_path = dpath / filename
             # Symlink protection
@@ -265,6 +281,7 @@ def discover_local_files(
             # Secret detection
             if is_secret_file(rel_path):
                 skip_counts["secret"] += 1
+                logger.debug("SKIP secret: %s", rel_path)
                 warnings.append(f"Skipped secret file: {rel_path}")
                 continue
 

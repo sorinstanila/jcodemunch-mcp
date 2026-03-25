@@ -52,6 +52,7 @@ DEFAULTS = {
     "staleness_days": 7,
     "max_results": 500,
     "extra_ignore_patterns": [],
+    "exclude_secret_patterns": [],
     "extra_extensions": {},
     "context_providers": True,
     "meta_fields": None,  # None = all fields
@@ -83,6 +84,7 @@ CONFIG_TYPES = {
     "staleness_days": int,
     "max_results": int,
     "extra_ignore_patterns": list,
+    "exclude_secret_patterns": list,
     "extra_extensions": dict,
     "context_providers": bool,
     "meta_fields": (list, type(None)),

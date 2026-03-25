@@ -157,7 +157,10 @@ def is_secret_file(file_path: str) -> bool:
     path_lower = file_path.lower()
     _, ext = os.path.splitext(name)
 
+    excluded = set(_config.get("exclude_secret_patterns", []))
     for pattern in SECRET_PATTERNS:
+        if pattern in excluded:
+            continue
         if pattern in _SECRET_DOC_EXEMPT_PATTERNS and ext in _SECRET_GLOB_SAFE_EXTENSIONS:
             continue
         if fnmatch.fnmatch(name, pattern):
