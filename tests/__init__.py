@@ -17,5 +17,9 @@ def _platform_path(unix_path: str) -> Path:
 
 
 def _platform_path_str(unix_path: str) -> str:
-    """Convert Unix-style path to platform-appropriate path string for config files."""
-    return str(_platform_path(unix_path))
+    """Convert Unix-style path to platform-appropriate path string for config files.
+
+    Returns forward-slash paths on Windows so the result is safe to embed in JSON.
+    Python's pathlib accepts forward slashes on Windows, so this is valid at runtime.
+    """
+    return _platform_path(unix_path).as_posix()
