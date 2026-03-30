@@ -34,6 +34,7 @@ from .tools.find_importers import find_importers
 from .tools.find_references import find_references
 from .tools.check_references import check_references
 from .tools.get_session_stats import get_session_stats
+from .tools.test_summarizer import test_summarizer
 from .tools.get_dependency_graph import get_dependency_graph
 from .tools.get_blast_radius import get_blast_radius
 from .tools.get_symbol_diff import get_symbol_diff
@@ -64,6 +65,7 @@ _EXCLUDED_FROM_STRICT = frozenset({
     "list_repos",
     "resolve_repo",
     "get_session_stats",
+    "test_summarizer",
     "index_repo",
     "index_folder",
     "index_file",
@@ -701,6 +703,20 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="test_summarizer",
+            description="Verify AI summarizer config and connectivity.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "timeout_ms": {
+                        "type": "integer",
+                        "description": "Slow-response threshold in ms.",
+                        "default": 15000,
+                    },
+                },
+            },
+        ),
+        Tool(
             name="get_dependency_graph",
             description="Get the file-level dependency graph for a given file. Traverses import relationships up to 3 hops. Use to understand what a file depends on ('imports'), what depends on it ('importers'), or both. Prerequisite for blast radius analysis.",
             inputSchema={
@@ -1302,6 +1318,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 functools.partial(
                     get_session_stats,
                     storage_path=storage_path,
+                )
+            )
+        elif name == "test_summarizer":
+            result = await asyncio.to_thread(
+                functools.partial(
+                    test_summarizer,
+                    timeout_ms=arguments.get("timeout_ms", 15000),
                 )
             )
         elif name == "get_dependency_graph":

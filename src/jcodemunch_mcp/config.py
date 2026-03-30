@@ -266,7 +266,7 @@ DEFAULTS = {
     "meta_fields": [],  # [] = no _meta (token-efficient; set null in config for all fields)
     "languages": None,  # None = all languages
     "languages_adaptive": False,
-    "disabled_tools": [],
+    "disabled_tools": ["test_summarizer"],
     "descriptions": {},
     "transport": "stdio",
     "host": "127.0.0.1",
@@ -928,6 +928,7 @@ def generate_template() -> str:
         "search_symbols",
         "search_text",
         "suggest_queries",
+        "test_summarizer",
     ])
     tools_str = "\n  // ".join(f'"{t}",' for t in all_tools)
 
@@ -1038,8 +1039,12 @@ def generate_template() -> str:
   // Global: tools listed here are removed from the schema entirely.
   // Project: tools listed here are rejected at call_tool() with an
   //   explanatory error (schema is global, can't be changed per-project).
-  // Default: empty (all tools enabled). Uncomment to disable specific tools.
+  // Default: test_summarizer disabled. Uncomment others to disable them.
   "disabled_tools": [
+    // test_summarizer — diagnostic: sends a probe to the AI summarizer and
+    //   reports status (ok, timeout, error, misconfigured, disabled).
+    //   Remove from this list to enable it, then call it from your MCP client.
+    "test_summarizer",
   // {tools_str}
   ],
 

@@ -10,7 +10,7 @@ from jcodemunch_mcp.server import server, list_tools, call_tool, _coerce_argumen
 
 @pytest.mark.asyncio
 async def test_server_lists_all_tools():
-    """Test that server lists all 30 tools."""
+    """Test that server lists all 30 enabled tools (test_summarizer disabled by default)."""
     tools = await list_tools()
 
     assert len(tools) == 30
@@ -27,6 +27,7 @@ async def test_server_lists_all_tools():
         "get_changed_symbols", "get_ranked_context", "embed_repo",
     }
     assert names == expected
+    assert "test_summarizer" not in names  # disabled by default
 
 
 @pytest.mark.asyncio
@@ -637,8 +638,8 @@ async def test_disabled_tools_filtered_from_schema(monkeypatch):
         assert "index_repo" not in tool_names
         assert "search_columns" not in tool_names
         assert "get_file_tree" in tool_names  # Not disabled
-        # Total should be 28 (30 - 2 disabled)
-        assert len(tools) == 28
+        # Total should be 29 (31 - 2 disabled)
+        assert len(tools) == 29
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -646,7 +647,7 @@ async def test_disabled_tools_filtered_from_schema(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_disabled_tools_empty_all_tools_present(monkeypatch):
-    """When disabled_tools is empty, all 30 tools are present."""
+    """When disabled_tools is empty, all 31 tools are present."""
     from jcodemunch_mcp import config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
@@ -656,7 +657,7 @@ async def test_disabled_tools_empty_all_tools_present(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        assert len(tools) == 30
+        assert len(tools) == 31
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)

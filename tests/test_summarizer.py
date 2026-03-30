@@ -1291,3 +1291,100 @@ def test_circuit_breaker_disabled_when_zero():
     # All 5 batches attempted — circuit never trips
     assert summarizer.call_count == 5
     assert summarizer._circuit_broken is False
+
+
+# ---------------------------------------------------------------------------
+# test_summarizer diagnostic tool
+# ---------------------------------------------------------------------------
+
+
+def test_test_summarizer_disabled():
+    """test_summarizer returns disabled status when use_ai_summaries is false."""
+    from jcodemunch_mcp.tools.test_summarizer import test_summarizer as run_test
+
+    with patch(
+        "jcodemunch_mcp.tools.test_summarizer._config.get",
+        side_effect=lambda k, d=None: "false" if k == "use_ai_summaries" else d,
+    ):
+        result = run_test()
+
+    assert result["status"] == "disabled"
+    assert result["error"] is not None
+
+
+def test_test_summarizer_no_provider():
+    """test_summarizer returns no_provider when no API keys are set."""
+    from jcodemunch_mcp.tools.test_summarizer import test_summarizer as run_test
+
+    with patch(
+        "jcodemunch_mcp.tools.test_summarizer._config.get",
+        side_effect=lambda k, d=None: "auto" if k == "use_ai_summaries" else d,
+    ), patch(
+        "jcodemunch_mcp.tools.test_summarizer.get_provider_name",
+        return_value=None,
+    ):
+        result = run_test()
+
+    assert result["status"] == "no_provider"
+
+
+def test_test_summarizer_ok():
+    """test_summarizer returns ok when AI produces a real summary."""
+    from jcodemunch_mcp.tools.test_summarizer import test_summarizer as run_test
+
+    mock_summarizer = MagicMock()
+    mock_summarizer.model = "test-model"
+
+    def fake_summarize(symbols, batch_size=1):
+        for sym in symbols:
+            sym.summary = "Greets the user by name."
+        return symbols
+
+    mock_summarizer.summarize_batch.side_effect = fake_summarize
+
+    with patch(
+        "jcodemunch_mcp.tools.test_summarizer._config.get",
+        side_effect=lambda k, d=None: "auto" if k == "use_ai_summaries" else d,
+    ), patch(
+        "jcodemunch_mcp.tools.test_summarizer.get_provider_name",
+        return_value="anthropic",
+    ), patch(
+        "jcodemunch_mcp.tools.test_summarizer._create_summarizer",
+        return_value=mock_summarizer,
+    ):
+        result = run_test()
+
+    assert result["status"] == "ok"
+    assert result["provider"] == "anthropic"
+    assert result["summary"] == "Greets the user by name."
+    assert result["elapsed_ms"] is not None
+
+
+def test_test_summarizer_fallback():
+    """test_summarizer detects when AI fell back to signature."""
+    from jcodemunch_mcp.tools.test_summarizer import test_summarizer as run_test
+
+    mock_summarizer = MagicMock()
+    mock_summarizer.model = "test-model"
+
+    def fake_fallback(symbols, batch_size=1):
+        for sym in symbols:
+            sym.summary = "def greet(name: str) -> str:"  # signature = fallback
+        return symbols
+
+    mock_summarizer.summarize_batch.side_effect = fake_fallback
+
+    with patch(
+        "jcodemunch_mcp.tools.test_summarizer._config.get",
+        side_effect=lambda k, d=None: "auto" if k == "use_ai_summaries" else d,
+    ), patch(
+        "jcodemunch_mcp.tools.test_summarizer.get_provider_name",
+        return_value="openrouter",
+    ), patch(
+        "jcodemunch_mcp.tools.test_summarizer._create_summarizer",
+        return_value=mock_summarizer,
+    ):
+        result = run_test()
+
+    assert result["status"] == "fallback"
+    assert "signature" in result["error"].lower()

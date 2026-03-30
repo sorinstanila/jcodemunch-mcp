@@ -169,10 +169,10 @@ class TestConfigDefaults:
         from src.jcodemunch_mcp.config import DEFAULTS
         assert DEFAULTS["languages"] is None
 
-    def test_default_disabled_tools_is_empty(self):
-        """Should default to empty list (all tools enabled)."""
+    def test_default_disabled_tools(self):
+        """Should default to test_summarizer disabled."""
         from src.jcodemunch_mcp.config import DEFAULTS
-        assert DEFAULTS["disabled_tools"] == []
+        assert DEFAULTS["disabled_tools"] == ["test_summarizer"]
 
     def test_default_strict_timeout_ms(self):
         """strict_timeout_ms should default to 500ms."""
@@ -1740,7 +1740,7 @@ class TestConfigTypeValidation:
 
             load_config(tmpdir)
             # Should fall back to default
-            assert get("disabled_tools") == []
+            assert get("disabled_tools") == ["test_summarizer"]
 
     def test_dict_type_mismatch_list(self):
         """List should be rejected for dict type."""
