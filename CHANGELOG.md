@@ -4,6 +4,14 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.21.12] - 2026-04-02
+
+### Added
+- **PSR-4 namespace resolution for PHP projects (Stage 1 of jgravelle/jcodemunch-mcp#201)** — `find_importers`, `get_blast_radius`, `get_dependency_graph`, `find_dead_code`, and all other import-graph tools now correctly resolve PHP `use App\Models\User` statements to `app/Models/User.php` via `composer.json` PSR-4 autoload mappings. Previously these tools returned zero results for PHP projects using Composer autoloading (effectively every modern PHP project). `build_psr4_map()` and `resolve_php_namespace()` are new public helpers; `CodeIndex` auto-loads the PSR-4 map at load time when PHP files are present and `source_root` is set. 61 new tests added.
+- **PHP `property_declaration` symbol indexing** — PHP class properties (`protected $fillable`, `public string $name`, etc.) are now indexed as `property`-kind symbols, fixing a gap in PHP symbol coverage.
+- **Laravel context provider** — new `LaravelContextProvider` detects Laravel projects (via `artisan` + `laravel/framework` in `composer.json`) and enriches symbols with: routes parsed from `routes/*.php`, Eloquent relationship/fillable/scope metadata from `app/Models/*.php`, controller-to-route mapping, and event→listener mappings from `EventServiceProvider`. Migration column definitions (from `database/migrations/*.php`) are exposed via `search_columns` under the `laravel_columns` key.
+- **Framework profile auto-detection** — `detect_framework()` checks for Laravel, Nuxt, Next.js, Vue SPA, and React SPA at index time and applies framework-specific `ignore_patterns` (e.g. `vendor/`, `.nuxt/`, `.next/`) automatically. Profile `entry_point_patterns` and `layer_definitions` are stored in `context_metadata` for downstream use by `find_dead_code` and `get_layer_violations`. The `index_folder` result now includes `framework_profile` when a profile is active. Zero overhead for non-matching projects.
+
 ## [1.21.11] - 2026-04-02
 
 ### Added

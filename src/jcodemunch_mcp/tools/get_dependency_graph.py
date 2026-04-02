@@ -11,14 +11,15 @@ from .package_registry import extract_root_package_from_specifier
 
 
 def _build_adjacency(
-    imports: dict, source_files: frozenset, alias_map: Optional[dict] = None
+    imports: dict, source_files: frozenset, alias_map: Optional[dict] = None,
+    psr4_map: Optional[dict] = None,
 ) -> dict[str, list[str]]:
     """Build forward adjacency {file: [files_it_imports]} from raw import data."""
     adj: dict[str, list[str]] = {}
     for src_file, file_imports in imports.items():
         resolved = []
         for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map)
+            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
             if target and target != src_file:
                 resolved.append(target)
         if resolved:
@@ -105,7 +106,7 @@ def get_dependency_graph(
         return {"error": f"File not found in index: {file}"}
 
     source_files = frozenset(index.source_files)
-    fwd = _build_adjacency(index.imports, source_files, index.alias_map)
+    fwd = _build_adjacency(index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None))
     rev = _invert(fwd)
 
     nodes_out: set[str] = set()

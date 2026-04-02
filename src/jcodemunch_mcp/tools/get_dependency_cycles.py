@@ -118,7 +118,7 @@ def get_dependency_cycles(
         }
 
     source_files = frozenset(index.source_files)
-    adj = _build_adjacency(index.imports, source_files, getattr(index, "alias_map", None))
+    adj = _build_adjacency(index.imports, source_files, getattr(index, "alias_map", None), getattr(index, "psr4_map", None))
     cycles = _find_cycles(adj)
 
     elapsed = (time.perf_counter() - start) * 1000

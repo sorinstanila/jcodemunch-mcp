@@ -8,6 +8,7 @@ from .base import ContextProvider, FileContext, discover_providers, enrich_symbo
 
 from . import dbt  # noqa: F401
 from . import git_blame  # noqa: F401
+from . import laravel  # noqa: F401
 
 __all__ = [
     "ContextProvider",

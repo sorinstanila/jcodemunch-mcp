@@ -71,9 +71,10 @@ def check_rename_safe(
     if index.imports:
         source_files_fs = frozenset(index.source_files)
         alias_map = getattr(index, "alias_map", {}) or {}
+        psr4_map = getattr(index, "psr4_map", None)
         for src_file, file_imports in index.imports.items():
             for imp in file_imports:
-                target = resolve_specifier(imp["specifier"], src_file, source_files_fs, alias_map)
+                target = resolve_specifier(imp["specifier"], src_file, source_files_fs, alias_map, psr4_map)
                 if target == sym_file:
                     files_to_check.add(src_file)
                     break

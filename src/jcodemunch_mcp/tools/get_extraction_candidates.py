@@ -97,11 +97,12 @@ def get_extraction_candidates(
     # Build reverse adjacency: file → [files that import it]
     source_files_fs = frozenset(index.source_files)
     alias_map = getattr(index, "alias_map", {}) or {}
+    psr4_map = getattr(index, "psr4_map", None)
     rev: dict[str, list[str]] = {}
     if index.imports:
         for src_file, file_imports in index.imports.items():
             for imp in file_imports:
-                target = resolve_specifier(imp["specifier"], src_file, source_files_fs, alias_map)
+                target = resolve_specifier(imp["specifier"], src_file, source_files_fs, alias_map, psr4_map)
                 if target and target != src_file:
                     rev.setdefault(target, []).append(src_file)
 

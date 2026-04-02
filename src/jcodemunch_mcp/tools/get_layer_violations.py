@@ -140,7 +140,7 @@ def get_layer_violations(
 
     source_files = frozenset(index.source_files)
     alias_map = getattr(index, "alias_map", None)
-    fwd = _build_adjacency(index.imports, source_files, alias_map)
+    fwd = _build_adjacency(index.imports, source_files, alias_map, getattr(index, "psr4_map", None))
 
     violations: list[dict] = []
 

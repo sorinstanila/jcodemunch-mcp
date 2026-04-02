@@ -345,6 +345,76 @@ _PY_EXTENSIONS = (".py",)
 _RUBY_EXTENSIONS = (".rb",)
 _ALL_EXTENSIONS = _JS_EXTENSIONS + _PY_EXTENSIONS + _RUBY_EXTENSIONS + (".go",)
 
+# ---------------------------------------------------------------------------
+# PSR-4 namespace resolution (PHP / Composer)
+# ---------------------------------------------------------------------------
+
+# Module-level cache: source_root -> {namespace_prefix: relative_dir}
+_psr4_map_cache: dict[str, dict[str, str]] = {}
+
+
+def build_psr4_map(source_root: str) -> dict[str, str]:
+    """Parse composer.json PSR-4 autoload mappings for a project root.
+
+    Returns a dict mapping namespace prefix strings (e.g. ``"App\\\\"`` ) to
+    repo-root-relative directory strings (e.g. ``"app/"``).  Includes both
+    ``autoload`` and ``autoload-dev`` sections.  Results are module-level
+    cached by ``source_root``; a re-index is needed if composer.json changes.
+
+    Returns an empty dict when composer.json is absent or cannot be parsed.
+    """
+    if not source_root:
+        return {}
+    if source_root in _psr4_map_cache:
+        return _psr4_map_cache[source_root]
+
+    composer_path = Path(source_root) / "composer.json"
+    if not composer_path.exists():
+        _psr4_map_cache[source_root] = {}
+        return {}
+
+    try:
+        data = json.loads(composer_path.read_text("utf-8", errors="replace"))
+        mapping: dict[str, str] = {}
+        for section in ("autoload", "autoload-dev"):
+            for prefix, paths in data.get(section, {}).get("psr-4", {}).items():
+                if prefix in mapping:
+                    continue  # first definition wins
+                if isinstance(paths, str):
+                    paths = [paths]
+                if paths:
+                    rel_dir = paths[0].replace("\\", "/").rstrip("/") + "/"
+                    mapping[prefix] = rel_dir
+        _psr4_map_cache[source_root] = mapping
+        return mapping
+    except Exception:
+        _psr4_map_cache[source_root] = {}
+        return {}
+
+
+def resolve_php_namespace(
+    fqn: str,
+    psr4_map: dict[str, str],
+    source_files: set[str],
+) -> Optional[str]:
+    """Resolve a PHP fully-qualified class name to a repo-relative file path.
+
+    Example: ``"App\\\\Models\\\\User"`` with ``{"App\\\\": "app/"}``
+    resolves to ``"app/Models/User.php"``.
+
+    Prefixes are matched longest-first so more specific mappings win.
+    Returns ``None`` if no prefix matches or the resolved path is not in
+    ``source_files``.
+    """
+    for prefix, base_dir in sorted(psr4_map.items(), key=lambda x: -len(x[0])):
+        if fqn.startswith(prefix):
+            relative = fqn[len(prefix):].replace("\\", "/") + ".php"
+            candidate = base_dir + relative
+            if candidate in source_files:
+                return candidate
+    return None
+
+
 # Cache for SQL stem lookups — avoids O(n) scans when resolve_specifier is
 # called repeatedly with the same source_files set (common in tight loops).
 # Keyed by frozenset of .sql paths (content identity, not object identity) to
@@ -506,19 +576,23 @@ def resolve_specifier(
     importer_path: str,
     source_files: set[str],
     alias_map: Optional[dict[str, list[str]]] = None,
+    psr4_map: Optional[dict[str, str]] = None,
 ) -> Optional[str]:
     """Attempt to resolve an import specifier to a concrete file in the index.
 
     Resolves relative imports (starting with '.') and tries common extension
     permutations.  For TypeScript/JS projects with path aliases (e.g. ``@/*``
     or ``$lib/*``), pass the project's ``alias_map`` (from
-    :func:`_load_tsconfig_aliases`) to enable alias expansion.
+    :func:`_load_tsconfig_aliases`) to enable alias expansion.  For PHP
+    projects using Composer, pass ``psr4_map`` (from :func:`build_psr4_map`)
+    to resolve ``use App\\Models\\User`` → ``app/Models/User.php``.
 
     Args:
         specifier: Raw import specifier (e.g. '../intake/IntakeService' or '@/lib/utils').
         importer_path: POSIX path of the importing file (e.g. 'src/a/b.js').
         source_files: Set of all file paths present in the index.
         alias_map: Optional tsconfig path alias map for this project.
+        psr4_map: Optional PSR-4 namespace map from composer.json.
 
     Returns:
         The matching source file path, or None if unresolvable.
@@ -531,6 +605,12 @@ def resolve_specifier(
             if c in source_files:
                 return c
         return None
+
+    # PHP PSR-4 namespace resolution (specifiers containing backslashes)
+    if psr4_map and "\\" in specifier:
+        resolved = resolve_php_namespace(specifier, psr4_map, source_files)
+        if resolved:
+            return resolved
 
     # Absolute: try direct match first (e.g., for Go or absolute paths)
     for c in _candidates(specifier):
@@ -547,7 +627,7 @@ def resolve_specifier(
     # Stem matching fallback: bare names like dbt ref('dim_client')
     # resolve to any .sql file whose stem matches.  Uses a cached stem
     # dict to avoid O(n) scans on repeated calls with the same source_files.
-    if "/" not in specifier and "." not in specifier:
+    if "/" not in specifier and "." not in specifier and "\\" not in specifier:
         return _get_sql_stems(source_files).get(specifier.lower())
 
     return None

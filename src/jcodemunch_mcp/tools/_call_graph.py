@@ -145,10 +145,11 @@ def find_direct_callees(
     file_imports = (index.imports or {}).get(sym_file, [])
     source_files_fs = frozenset(index.source_files)
     alias_map = getattr(index, "alias_map", {}) or {}
+    psr4_map = getattr(index, "psr4_map", None)
 
     imported_files: set[str] = set()
     for imp in file_imports:
-        target = resolve_specifier(imp["specifier"], sym_file, source_files_fs, alias_map)
+        target = resolve_specifier(imp["specifier"], sym_file, source_files_fs, alias_map, psr4_map)
         if target and target != sym_file:
             imported_files.add(target)
 

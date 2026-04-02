@@ -13,13 +13,14 @@ from ._call_graph import build_symbols_by_file, find_direct_callers, bfs_callers
 
 
 def _build_reverse_adjacency(
-    imports: dict, source_files: frozenset, alias_map: Optional[dict] = None
+    imports: dict, source_files: frozenset, alias_map: Optional[dict] = None,
+    psr4_map: Optional[dict] = None,
 ) -> dict[str, list[str]]:
     """Return {file: [files_that_import_it]} from raw import data."""
     rev: dict[str, list[str]] = {}
     for src_file, file_imports in imports.items():
         for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map)
+            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
             if target and target != src_file:
                 rev.setdefault(target, []).append(src_file)
     # Deduplicate
@@ -158,7 +159,7 @@ def get_blast_radius(
 
     # Build reverse adjacency (importer graph)
     source_files = frozenset(index.source_files)
-    rev = _build_reverse_adjacency(index.imports, source_files, index.alias_map)
+    rev = _build_reverse_adjacency(index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None))
 
     # BFS to collect all importing files
     importer_files, files_by_depth = _bfs_importers(sym_file, rev, depth)

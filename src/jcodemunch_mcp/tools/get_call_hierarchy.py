@@ -75,6 +75,7 @@ def get_call_hierarchy(
         index.imports,
         frozenset(index.source_files),
         getattr(index, "alias_map", None),
+        getattr(index, "psr4_map", None),
     )
 
     callers: list[dict] = []

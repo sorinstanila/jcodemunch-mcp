@@ -94,7 +94,7 @@ def get_repo_outline(
         source_files_set = frozenset(index.source_files)
         for src_file, file_imports in index.imports.items():
             for imp in file_imports:
-                target = resolve_specifier(imp["specifier"], src_file, source_files_set, index.alias_map)
+                target = resolve_specifier(imp["specifier"], src_file, source_files_set, index.alias_map, getattr(index, "psr4_map", None))
                 if target and target != src_file:
                     in_degree[target] += 1
         most_imported = [
@@ -107,7 +107,7 @@ def get_repo_outline(
     most_central: list = []
     if index.imports is not None:
         try:
-            pr_scores, _ = compute_pagerank(index.imports, index.source_files, index.alias_map)
+            pr_scores, _ = compute_pagerank(index.imports, index.source_files, index.alias_map, psr4_map=getattr(index, "psr4_map", None))
             # Kind priority for picking the representative symbol per file
             _KIND_PRIO = {"class": 0, "function": 1, "method": 2, "type": 3, "constant": 4}
             file_to_best: dict = {}

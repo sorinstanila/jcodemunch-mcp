@@ -65,7 +65,7 @@ def get_coupling_metrics(
 
     source_files = frozenset(index.source_files)
     alias_map = getattr(index, "alias_map", None)
-    fwd = _build_adjacency(index.imports, source_files, alias_map)
+    fwd = _build_adjacency(index.imports, source_files, alias_map, getattr(index, "psr4_map", None))
 
     # Build reverse adjacency (importers)
     rev: dict[str, list[str]] = {}

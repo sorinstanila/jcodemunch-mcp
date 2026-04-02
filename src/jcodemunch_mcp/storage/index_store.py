@@ -90,6 +90,7 @@ class CodeIndex:
     file_mtimes: dict[str, int] = field(default_factory=dict)  # file_path -> os.stat().st_mtime_ns
     file_sizes: dict[str, int] = field(default_factory=dict)   # file_path -> size in bytes (UTF-8 encoded)
     alias_map: dict[str, list[str]] = field(default_factory=dict)  # tsconfig/jsconfig path aliases; auto-loaded from source_root
+    psr4_map: dict[str, str] = field(default_factory=dict)  # PHP PSR-4 namespace map from composer.json; auto-loaded from source_root
     package_names: list[str] = field(default_factory=list)    # Package names published by this repo (from manifest files)
 
     def __post_init__(self) -> None:
@@ -107,6 +108,14 @@ class CodeIndex:
             try:
                 from ..parser.imports import _load_tsconfig_aliases
                 self.alias_map = _load_tsconfig_aliases(self.source_root)
+            except Exception:
+                pass
+        # Load PSR-4 namespace map from composer.json if PHP files are present
+        if not self.psr4_map and self.source_root:
+            try:
+                if any(f.endswith(".php") for f in self.source_files):
+                    from ..parser.imports import build_psr4_map
+                    self.psr4_map = build_psr4_map(self.source_root)
             except Exception:
                 pass
 

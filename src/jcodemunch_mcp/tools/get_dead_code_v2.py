@@ -62,11 +62,11 @@ def _is_barrel(file_path: str) -> bool:
     return _filename(file_path) in _BARREL_FILENAMES
 
 
-def _build_reverse_adjacency(imports: dict, source_files: frozenset, alias_map: dict) -> dict[str, list[str]]:
+def _build_reverse_adjacency(imports: dict, source_files: frozenset, alias_map: dict, psr4_map: Optional[dict] = None) -> dict[str, list[str]]:
     rev: dict[str, list[str]] = {}
     for src_file, file_imports in imports.items():
         for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map)
+            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
             if target and target != src_file:
                 rev.setdefault(target, []).append(src_file)
     return {k: list(dict.fromkeys(v)) for k, v in rev.items()}
@@ -146,7 +146,8 @@ def get_dead_code_v2(
 
     source_files = frozenset(index.source_files)
     alias_map = getattr(index, "alias_map", {}) or {}
-    rev = _build_reverse_adjacency(index.imports, source_files, alias_map)
+    psr4_map = getattr(index, "psr4_map", None)
+    rev = _build_reverse_adjacency(index.imports, source_files, alias_map, psr4_map)
 
     # Pre-compute reachable files from entry points (Signal 1 input)
     reachable_files = _reachable_from_entry_points(list(index.source_files), rev)

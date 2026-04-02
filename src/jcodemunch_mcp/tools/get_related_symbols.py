@@ -21,7 +21,8 @@ def _tokenize_name(name: str) -> set[str]:
 
 
 def _build_file_importers(
-    imports: Optional[dict], source_files: frozenset, alias_map: Optional[dict] = None
+    imports: Optional[dict], source_files: frozenset, alias_map: Optional[dict] = None,
+    psr4_map: Optional[dict] = None,
 ) -> dict[str, set[str]]:
     """Return {file: {files_that_import_it}} — used for shared-importer signal."""
     if not imports:
@@ -29,7 +30,7 @@ def _build_file_importers(
     rev: dict[str, set[str]] = {}
     for src_file, file_imports in imports.items():
         for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map)
+            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
             if target and target != src_file:
                 rev.setdefault(target, set()).add(src_file)
     return rev
@@ -85,7 +86,7 @@ def get_related_symbols(
 
     # Build shared-importer map if imports are available
     source_files = frozenset(index.source_files)
-    file_importers = _build_file_importers(index.imports, source_files, index.alias_map)
+    file_importers = _build_file_importers(index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None))
     target_importers = file_importers.get(target_file, set())
 
     scores: dict[str, float] = {}

@@ -38,7 +38,7 @@ def _find_importers_single(
     files_that_are_imported: set[str] = set()
     for src_file, file_imports in index.imports.items():
         for imp in file_imports:
-            resolved = resolve_specifier(imp["specifier"], src_file, source_files, index.alias_map)
+            resolved = resolve_specifier(imp["specifier"], src_file, source_files, index.alias_map, getattr(index, "psr4_map", None))
             if resolved:
                 files_that_are_imported.add(resolved)
 
@@ -48,7 +48,7 @@ def _find_importers_single(
         if src_file == file_path:
             continue
         for imp in file_imports:
-            resolved = resolve_specifier(imp["specifier"], src_file, source_files, index.alias_map)
+            resolved = resolve_specifier(imp["specifier"], src_file, source_files, index.alias_map, getattr(index, "psr4_map", None))
             if resolved == file_path:
                 results.append({
                     "file": src_file,
@@ -107,7 +107,7 @@ def _find_importers_batch(
     files_that_are_imported: set[str] = set()
     for src_file, file_imports in index.imports.items():
         for imp in file_imports:
-            resolved = resolve_specifier(imp["specifier"], src_file, source_files, index.alias_map)
+            resolved = resolve_specifier(imp["specifier"], src_file, source_files, index.alias_map, getattr(index, "psr4_map", None))
             if resolved:
                 files_that_are_imported.add(resolved)
 
@@ -115,7 +115,7 @@ def _find_importers_batch(
     import_map: dict[str, list[dict]] = {}
     for src_file, file_imports in index.imports.items():
         for imp in file_imports:
-            resolved = resolve_specifier(imp["specifier"], src_file, source_files, index.alias_map)
+            resolved = resolve_specifier(imp["specifier"], src_file, source_files, index.alias_map, getattr(index, "psr4_map", None))
             if resolved:
                 import_map.setdefault(resolved, []).append({
                     "file": src_file,

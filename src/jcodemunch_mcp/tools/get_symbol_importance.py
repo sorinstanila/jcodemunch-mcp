@@ -70,11 +70,12 @@ def get_symbol_importance(
             if fnmatch(f, scope) or f.startswith(scope_prefix) or fnmatch(f, scope + "/**")
         ]
 
-    in_deg, out_deg = compute_in_out_degrees(index.imports, source_files, index.alias_map)
+    _psr4 = getattr(index, "psr4_map", None)
+    in_deg, out_deg = compute_in_out_degrees(index.imports, source_files, index.alias_map, _psr4)
 
     iterations = 0
     if algorithm == "pagerank":
-        scores, iterations = compute_pagerank(index.imports, source_files, index.alias_map)
+        scores, iterations = compute_pagerank(index.imports, source_files, index.alias_map, psr4_map=_psr4)
     else:
         # degree: score is normalized in-degree (proportion of all imports)
         total_in = sum(in_deg.values()) or 1

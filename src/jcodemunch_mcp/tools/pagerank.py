@@ -10,6 +10,7 @@ def compute_pagerank(
     damping: float = 0.85,
     max_iter: int = 100,
     tol: float = 1e-6,
+    psr4_map: Optional[dict] = None,
 ) -> tuple:
     """Compute PageRank on the file import graph.
 
@@ -35,7 +36,7 @@ def compute_pagerank(
             continue
         seen: set = set()
         for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_file_set, alias_map)
+            target = resolve_specifier(imp["specifier"], src_file, source_file_set, alias_map, psr4_map)
             if target and target != src_file and target in source_file_set and target not in seen:
                 seen.add(target)
                 out_links[src_file].append(target)
@@ -70,6 +71,7 @@ def compute_in_out_degrees(
     imports: dict,
     source_files: list,
     alias_map: Optional[dict] = None,
+    psr4_map: Optional[dict] = None,
 ) -> tuple:
     """Return (in_degree, out_degree) dicts for each file.
 
@@ -87,7 +89,7 @@ def compute_in_out_degrees(
             continue
         seen: set = set()
         for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_file_set, alias_map)
+            target = resolve_specifier(imp["specifier"], src_file, source_file_set, alias_map, psr4_map)
             if target and target != src_file and target in source_file_set and target not in seen:
                 seen.add(target)
                 in_deg[target] = in_deg.get(target, 0) + 1

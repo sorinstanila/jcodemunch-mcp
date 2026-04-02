@@ -81,6 +81,7 @@ def get_impact_preview(
         index.imports,
         frozenset(index.source_files),
         getattr(index, "alias_map", None),
+        getattr(index, "psr4_map", None),
     )
     symbol_index: dict[str, dict] = getattr(index, "_symbol_index", {})
 

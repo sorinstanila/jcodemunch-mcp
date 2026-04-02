@@ -398,6 +398,7 @@ PHP_SPEC = LanguageSpec(
         "interface_declaration": "type",
         "trait_declaration": "type",
         "enum_declaration": "type",
+        "property_declaration": "property",
     },
     name_fields={
         "function_definition": "name",
@@ -406,6 +407,7 @@ PHP_SPEC = LanguageSpec(
         "interface_declaration": "name",
         "trait_declaration": "name",
         "enum_declaration": "name",
+        "property_declaration": "name",
     },
     param_fields={
         "function_definition": "parameters",

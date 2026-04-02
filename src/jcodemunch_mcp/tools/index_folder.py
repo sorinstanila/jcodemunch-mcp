@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 from .. import config as _config
 from ..parser import parse_file, LANGUAGE_EXTENSIONS, get_language_for_path
 from ..parser.context import discover_providers, enrich_symbols, collect_metadata
+from ..parser.context.framework_profiles import detect_framework, profile_to_meta
 from ..parser.imports import extract_imports, _alias_map_cache as _imap_cache
 from ..security import (
     validate_path,
@@ -788,11 +789,24 @@ def index_folder(
                 return result
 
         # ── Standard path: full directory discovery ──
+        # Detect framework profile and merge its ignore patterns before discovery
+        _framework_profile = detect_framework(folder_path)
+        _profile_ignore: list[str] = []
+        if _framework_profile:
+            _profile_ignore = _framework_profile.ignore_patterns
+            logger.info(
+                "Framework profile '%s' active — adding %d ignore patterns",
+                _framework_profile.name,
+                len(_profile_ignore),
+            )
+
+        _merged_ignore = list(extra_ignore_patterns or []) + _profile_ignore
+
         # Discover source files (with security filtering)
         source_files, discover_warnings, skip_counts = discover_local_files(
             folder_path,
             max_files=max_files,
-            extra_ignore_patterns=extra_ignore_patterns,
+            extra_ignore_patterns=_merged_ignore or None,
             follow_symlinks=follow_symlinks,
         )
         warnings.extend(discover_warnings)
@@ -1081,6 +1095,14 @@ def index_folder(
         # Collect structured metadata from providers
         full_context_metadata = collect_metadata(active_providers) if active_providers else None
 
+        # Merge framework profile metadata into context_metadata
+        if _framework_profile:
+            profile_meta = profile_to_meta(_framework_profile)
+            if full_context_metadata:
+                full_context_metadata.update(profile_meta)
+            else:
+                full_context_metadata = profile_meta
+
         # Extract package names from manifest files
         _pkg_names: list[str] = []
         try:
@@ -1131,6 +1153,9 @@ def index_folder(
             for provider in active_providers:
                 enrichment[provider.name] = provider.stats()
             result["context_enrichment"] = enrichment
+
+        if _framework_profile:
+            result["framework_profile"] = _framework_profile.name
 
         if warnings:
             result["warnings"] = warnings

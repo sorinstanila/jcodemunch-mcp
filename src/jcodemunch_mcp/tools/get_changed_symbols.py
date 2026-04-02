@@ -196,7 +196,7 @@ def get_changed_symbols(
     rev_adj = None
     if include_blast_radius and index.imports is not None:
         source_files = frozenset(index.source_files)
-        rev_adj = _build_reverse_adjacency(index.imports, source_files, index.alias_map)
+        rev_adj = _build_reverse_adjacency(index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None))
 
     # For each changed file, parse both versions and diff symbol sets
     added_symbols: list[dict] = []

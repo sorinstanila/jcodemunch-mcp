@@ -42,7 +42,7 @@ def _file_centrality(index) -> dict[str, float]:
     counts: dict[str, int] = {}
     for src_file, file_imports in index.imports.items():
         for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, index.alias_map)
+            target = resolve_specifier(imp["specifier"], src_file, source_files, index.alias_map, getattr(index, "psr4_map", None))
             if target:
                 counts[target] = counts.get(target, 0) + 1
     return {f: math.log(1 + c) for f, c in counts.items()}

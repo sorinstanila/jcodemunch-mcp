@@ -97,7 +97,8 @@ def _compute_bm25(symbols: list[dict]) -> tuple[dict[str, float], float, dict[st
 
 
 def _compute_centrality(
-    symbols: list[dict], imports: Optional[dict], alias_map: Optional[dict] = None
+    symbols: list[dict], imports: Optional[dict], alias_map: Optional[dict] = None,
+    psr4_map: Optional[dict] = None,
 ) -> dict[str, float]:
     """Return {file: log-scaled centrality bonus} based on importer count."""
     if not imports:
@@ -106,7 +107,7 @@ def _compute_centrality(
     counts: dict[str, int] = {}
     for src_file, file_imports in imports.items():
         for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map)
+            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
             if target:
                 counts[target] = counts.get(target, 0) + 1
     return {f: math.log(1 + c) * _CENTRALITY_WEIGHT for f, c in counts.items()}
@@ -322,7 +323,7 @@ def search_symbols(
     cache = index._bm25_cache
     if "idf" not in cache:
         cache["idf"], cache["avgdl"], cache["inverted"] = _compute_bm25(index.symbols)
-        cache["centrality"] = _compute_centrality(index.symbols, index.imports, index.alias_map)
+        cache["centrality"] = _compute_centrality(index.symbols, index.imports, index.alias_map, getattr(index, "psr4_map", None))
     idf = cache["idf"]
     avgdl = cache["avgdl"]
     centrality = cache["centrality"]
@@ -334,7 +335,7 @@ def search_symbols(
         if "pagerank" not in cache:
             from .pagerank import compute_pagerank
             pr_scores, _ = compute_pagerank(
-                index.imports or {}, index.source_files, index.alias_map
+                index.imports or {}, index.source_files, index.alias_map, psr4_map=getattr(index, "psr4_map", None)
             )
             cache["pagerank"] = pr_scores
         pagerank = cache["pagerank"]

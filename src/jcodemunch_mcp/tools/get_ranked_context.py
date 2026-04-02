@@ -77,7 +77,7 @@ def get_ranked_context(
     if "idf" not in cache:
         from .search_symbols import _compute_centrality  # noqa: PLC0415
         cache["idf"], cache["avgdl"], cache["inverted"] = _compute_bm25(index.symbols)
-        cache["centrality"] = _compute_centrality(index.symbols, index.imports, index.alias_map)
+        cache["centrality"] = _compute_centrality(index.symbols, index.imports, index.alias_map, getattr(index, "psr4_map", None))
     idf = cache["idf"]
     avgdl = cache["avgdl"]
     inverted = cache["inverted"]
@@ -88,7 +88,7 @@ def get_ranked_context(
         if "pagerank" not in cache:
             from .pagerank import compute_pagerank  # noqa: PLC0415
             pr_scores, _ = compute_pagerank(
-                index.imports or {}, index.source_files, index.alias_map
+                index.imports or {}, index.source_files, index.alias_map, psr4_map=getattr(index, "psr4_map", None)
             )
             cache["pagerank"] = pr_scores
         pagerank = cache["pagerank"]
