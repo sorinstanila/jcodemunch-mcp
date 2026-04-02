@@ -46,6 +46,10 @@ from .tools.get_impact_preview import get_impact_preview
 from .tools.check_rename_safe import check_rename_safe
 from .tools.get_dead_code_v2 import get_dead_code_v2
 from .tools.get_extraction_candidates import get_extraction_candidates
+from .tools.get_symbol_complexity import get_symbol_complexity
+from .tools.get_churn_rate import get_churn_rate
+from .tools.get_hotspots import get_hotspots
+from .tools.get_repo_health import get_repo_health
 from .tools.get_symbol_diff import get_symbol_diff
 from .tools.get_class_hierarchy import get_class_hierarchy
 from .tools.get_related_symbols import get_related_symbols
@@ -1110,6 +1114,117 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="get_symbol_complexity",
+            description=(
+                "Return cyclomatic complexity, nesting depth, and parameter count for a single symbol. "
+                "Complexity data is stored at index time (requires jcodemunch-mcp >= 1.16 / INDEX_VERSION 7). "
+                "assessment field: 'low' (1-4), 'medium' (5-10), 'high' (11+). "
+                "Re-index the repo if all metrics show 0 (pre-1.16 index)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository identifier (owner/repo or just repo name)",
+                    },
+                    "symbol_id": {
+                        "type": "string",
+                        "description": "Full symbol ID as returned by search_symbols or get_file_outline.",
+                    },
+                },
+                "required": ["repo", "symbol_id"],
+            },
+        ),
+        Tool(
+            name="get_churn_rate",
+            description=(
+                "Return git churn metrics for a file or symbol: commit count, unique authors, "
+                "first_seen date, last_modified date, and churn_per_week over a configurable window. "
+                "assessment: 'stable' (<=1/week), 'active' (<=3/week), 'volatile' (>3/week). "
+                "Requires a locally indexed repo (index_folder); GitHub-indexed repos are not supported."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository identifier (owner/repo or just repo name)",
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Relative file path (e.g. 'src/utils.py') or a full symbol ID.",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Look-back window in days (default 90).",
+                        "default": 90,
+                    },
+                },
+                "required": ["repo", "target"],
+            },
+        ),
+        Tool(
+            name="get_hotspots",
+            description=(
+                "Return the top-N highest-risk symbols ranked by hotspot score = "
+                "cyclomatic_complexity x log(1 + commits_last_N_days). "
+                "Identifies code that is both complex and frequently changed — the highest "
+                "bug-introduction risk in the codebase. Methodology matches CodeScene/Adam Tornhill. "
+                "Requires jcodemunch-mcp >= 1.16 for complexity data and a locally indexed repo for churn."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository identifier (owner/repo or just repo name)",
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "Number of results to return (default 20).",
+                        "default": 20,
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Churn look-back window in days (default 90).",
+                        "default": 90,
+                    },
+                    "min_complexity": {
+                        "type": "integer",
+                        "description": "Minimum cyclomatic complexity to include (default 2).",
+                        "default": 2,
+                    },
+                },
+                "required": ["repo"],
+            },
+        ),
+        Tool(
+            name="get_repo_health",
+            description=(
+                "Return a one-call triage snapshot of the entire repository: symbol counts, "
+                "dead code %, average cyclomatic complexity, top 5 hotspots, dependency cycle count, "
+                "and unstable module count. "
+                "Designed to be the first tool called in any new session — one call gives a complete "
+                "picture to guide follow-up analysis."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository identifier (owner/repo or just repo name)",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Churn look-back window for hotspot calculation (default 90).",
+                        "default": 90,
+                    },
+                },
+                "required": ["repo"],
+            },
+        ),
+        Tool(
             name="get_symbol_importance",
             description=(
                 "Return the most architecturally important symbols in a repo, ranked by "
@@ -1744,6 +1859,45 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     file_path=arguments["file_path"],
                     min_complexity=arguments.get("min_complexity", 5),
                     min_callers=arguments.get("min_callers", 2),
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "get_symbol_complexity":
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_symbol_complexity,
+                    repo=arguments["repo"],
+                    symbol_id=arguments["symbol_id"],
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "get_churn_rate":
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_churn_rate,
+                    repo=arguments["repo"],
+                    target=arguments["target"],
+                    days=arguments.get("days", 90),
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "get_hotspots":
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_hotspots,
+                    repo=arguments["repo"],
+                    top_n=arguments.get("top_n", 20),
+                    days=arguments.get("days", 90),
+                    min_complexity=arguments.get("min_complexity", 2),
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "get_repo_health":
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_repo_health,
+                    repo=arguments["repo"],
+                    days=arguments.get("days", 90),
                     storage_path=storage_path,
                 )
             )

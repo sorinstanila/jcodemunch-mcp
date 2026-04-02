@@ -4,6 +4,16 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-04-01
+
+### Added
+- **`get_symbol_complexity(symbol_id)`** — returns cyclomatic complexity, max nesting depth, parameter count, line count, and a human-readable `assessment` ("low" / "medium" / "high") for any indexed function or method. Data is read directly from the index (no re-parsing); requires INDEX_VERSION 7 (jcodemunch-mcp >= 1.16).
+- **`get_churn_rate(target, days=90)`** — returns git commit count, unique authors, first-seen date, last-modified date, and `churn_per_week` for a file or symbol over a configurable look-back window. `assessment` field: "stable" (≤1/week), "active" (≤3/week), "volatile" (>3/week). Accepts a relative file path or a symbol ID. Requires a locally indexed repo.
+- **`get_hotspots(top_n=20, days=90, min_complexity=2)`** — ranks functions and methods by `hotspot_score = cyclomatic × log(1 + commits_last_N_days)`. Surfaces code that is both complex and frequently changed — the highest bug-introduction risk in the repo. Identical methodology to Adam Tornhill's CodeScene hotspot analysis. Falls back gracefully when git is unavailable (complexity-only scoring).
+- **`get_repo_health(days=90)`** — one-call triage snapshot: total files/symbols, dead-code %, average cyclomatic complexity, top-5 hotspots, dependency cycle count, and unstable module count. Produces a `summary` string suitable for immediate relay. Designed to be the first tool called in any new session. Thin aggregator — delegates to individual tools, no duplicated logic.
+- **Bug fix: complexity data now correctly persisted through `save_index`** — the symbol serialization dict in `save_index` was missing `cyclomatic`, `max_nesting`, and `param_count` fields (they were computed by the parser but silently dropped before DB write). Fixed by including these fields in the serialized dict. All tools depending on complexity data (`get_extraction_candidates`, `get_symbol_complexity`, `get_hotspots`) now return accurate values after a fresh `index_folder`.
+- **36 new tests** (1604 total, 7 skipped): `test_symbol_complexity.py`, `test_churn_rate.py`, `test_hotspots.py`, `test_repo_health.py`.
+
 ## [1.16.0] - 2026-04-01
 
 ### Added

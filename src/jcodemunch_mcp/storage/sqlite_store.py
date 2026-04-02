@@ -414,7 +414,10 @@ class SQLiteIndexStore:
              "docstring": s.docstring, "summary": s.summary, "decorators": s.decorators,
              "keywords": s.keywords, "parent": s.parent, "line": s.line,
              "end_line": s.end_line, "byte_offset": s.byte_offset,
-             "byte_length": s.byte_length, "content_hash": s.content_hash}
+             "byte_length": s.byte_length, "content_hash": s.content_hash,
+             "cyclomatic": getattr(s, "cyclomatic", 0) or 0,
+             "max_nesting": getattr(s, "max_nesting", 0) or 0,
+             "param_count": getattr(s, "param_count", 0) or 0}
             for s in symbols
         ]
 
