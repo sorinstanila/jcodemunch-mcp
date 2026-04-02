@@ -192,7 +192,7 @@ class TestSqlStemCache:
 
     def _reset_cache(self):
         """Reset the module-level stem cache to avoid cross-test pollution."""
-        _imports_mod._sql_stem_cache = (0, {})
+        _imports_mod._sql_stem_cache = {}
 
     def test_cached_lookup_matches_linear_scan(self):
         self._reset_cache()
@@ -210,10 +210,10 @@ class TestSqlStemCache:
         self._reset_cache()
         source_files = {"models/a.sql", "models/b.sql"}
         _get_sql_stems(source_files)
-        cached_id = _imports_mod._sql_stem_cache[0]
-        # Second call with same object reuses cache
+        assert len(_imports_mod._sql_stem_cache) == 1
+        # Second call with same content reuses cache (no new entries)
         _get_sql_stems(source_files)
-        assert _imports_mod._sql_stem_cache[0] == cached_id
+        assert len(_imports_mod._sql_stem_cache) == 1
 
     def test_cache_invalidated_for_different_set(self):
         self._reset_cache()
