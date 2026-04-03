@@ -69,7 +69,10 @@ def _sym_tokens(sym: dict) -> list[str]:
     for t in tokens:
         tf[t] = tf.get(t, 0) + 1
     sym["_tf"] = tf
-    sym["_dl"] = len(tokens)
+    # T10: use unique token count for _dl so it matches df (document-frequency)
+    # which also counts unique tokens per symbol. Using len(tokens) inflates
+    # avgdl by the field-repetition weights, distorting BM25 normalisation.
+    sym["_dl"] = len(set(tokens))
     return tokens
 
 
@@ -87,8 +90,14 @@ def _compute_bm25(symbols: list[dict]) -> tuple[dict[str, float], float, dict[st
     inverted: dict[str, list[int]] = {}
     for i, sym in enumerate(symbols):
         toks = _sym_tokens(sym)
-        total_dl += len(toks)
-        for t in set(toks):
+        # T11: always rewrite _dl with the canonical unique-token count.
+        # This makes BM25 rebuilds correct even for retained symbols whose _dl
+        # was cached before T10 (i.e., with the old len(tokens) formula).
+        unique_toks = set(toks)
+        dl = len(unique_toks)
+        sym["_dl"] = dl
+        total_dl += dl
+        for t in unique_toks:
             df[t] = df.get(t, 0) + 1
             inverted.setdefault(t, []).append(i)
     avgdl = total_dl / N
@@ -466,7 +475,9 @@ def search_symbols(
 
     # Extract results sorted by score descending
     scored_results = [entry for _, _, entry in sorted(heap, key=lambda x: x[0], reverse=True)]
+    heap_count = len(scored_results)  # save before budget packing
 
+    budget_truncated = False
     if token_budget is not None:
         packed, used_bytes = [], 0
         for entry in scored_results:
@@ -474,6 +485,7 @@ def search_symbols(
             if used_bytes + b <= budget_bytes:
                 packed.append(entry)
                 used_bytes += b
+        budget_truncated = len(packed) < heap_count
         scored_results = packed
 
     # Fuzzy pass: runs when explicitly requested OR when BM25 found nothing useful
@@ -565,7 +577,7 @@ def search_symbols(
     meta = {
         "timing_ms": round(elapsed, 1),
         "total_symbols": len(index.symbols),
-        "truncated": candidates_scored > len(scored_results),
+        "truncated": candidates_scored > heap_count or budget_truncated,
         "tokens_saved": tokens_saved,
         "total_tokens_saved": total_saved,
         **cost_avoided(tokens_saved, total_saved),

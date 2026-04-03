@@ -49,7 +49,8 @@ def _count_params(signature: str) -> int:
     else:
         params_str = m.group(1).strip()
 
-    if not params_str:
+    # Empty or C-style "no parameters" marker (void foo(void) → 0 params)
+    if not params_str or params_str == "void":
         return 0
 
     # Count top-level commas (not inside nested brackets)

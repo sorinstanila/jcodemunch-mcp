@@ -25,7 +25,6 @@ from .reindex_state import (
     mark_reindex_failed,
 )
 from .storage import IndexStore
-from .storage.index_store import _file_hash
 from .path_map import parse_path_map, remap
 
 logger = logging.getLogger(__name__)
@@ -285,16 +284,6 @@ async def _watch_single(
         if idx and idx.file_hashes:
             _hash_cache.update(idx.file_hashes)
 
-    def _update_hash_cache(abs_path: str, new_hash: str) -> None:
-        """Update the memory hash cache after a successful reindex."""
-        rel_path = Path(abs_path).relative_to(folder_path).as_posix()
-        _hash_cache[rel_path] = new_hash
-
-    def _remove_from_hash_cache(abs_path: str) -> None:
-        """Remove an entry from the memory hash cache on deletion."""
-        rel_path = Path(abs_path).relative_to(folder_path).as_posix()
-        _hash_cache.pop(rel_path, None)
-
     # Do an initial incremental index to ensure the index is current
     _watcher_output(f"  Initial index for {folder_path}...", quiet=quiet, log_file_handle=log_file_handle)
     mark_reindex_start(repo_id)
@@ -412,19 +401,13 @@ async def _watch_single(
                         quiet=quiet, log_file_handle=log_file_handle,
                     )
                     mark_reindex_done(repo_id, result)
-                    # Update hash cache with new hashes for changed/new files
-                    if watcher_changes:
-                        for wc in watcher_changes:
-                            if wc.change_type == "deleted":
-                                _remove_from_hash_cache(wc.path)
-                            elif wc.change_type in ("added", "modified"):
-                                # Re-read the new content hash after reindex
-                                try:
-                                    with open(wc.path, "r", encoding="utf-8", errors="replace") as f:
-                                        new_hash = _file_hash(f.read())
-                                    _update_hash_cache(wc.path, new_hash)
-                                except Exception:
-                                    pass
+                    # Rebuild hash cache from the index that index_folder just wrote.
+                    # Previously this re-read each changed file to compute the new hash,
+                    # but that introduced a double-read race: if the file changed again
+                    # between index_folder's read and the watcher's re-read, the cache
+                    # would record the wrong hash and silently skip the next change (T6).
+                    # Reading from the store is the single authoritative source of truth.
+                    _build_hash_cache()
                     # Report re-index activity (only if it actually did work)
                     if on_reindex is not None:
                         on_reindex()

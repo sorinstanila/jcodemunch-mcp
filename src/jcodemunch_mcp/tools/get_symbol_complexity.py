@@ -87,7 +87,11 @@ def get_symbol_complexity(
         "param_count": param_count,
         "lines": lines,
         "assessment": _complexity_assessment(cyclomatic),
-        "_meta": {"timing_ms": round((time.perf_counter() - t0) * 1000, 1)},
+        "_meta": {
+            "timing_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "methodology": "stored_metrics",
+            "confidence_level": "medium",
+        },
     }
     if note:
         result["note"] = note

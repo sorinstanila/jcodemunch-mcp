@@ -20,7 +20,7 @@ from .. import config as _config
 from ..parser import parse_file, LANGUAGE_EXTENSIONS, get_language_for_path
 from ..parser.context import discover_providers, enrich_symbols, collect_metadata, collect_extra_imports
 from ..parser.context.framework_profiles import detect_framework, profile_to_meta
-from ..parser.imports import extract_imports, _alias_map_cache as _imap_cache
+from ..parser.imports import extract_imports, _alias_map_cache as _imap_cache, _LANGUAGE_EXTRACTORS as _IMPORT_EXTRACTORS
 from ..security import (
     validate_path,
     is_symlink_escape,
@@ -512,32 +512,48 @@ def index_folder(
             repo_name: str,
         ) -> None:
             """Fill in AI summaries and update the store. Checks generation counter to abandon stale work."""
-            from ..reindex_state import _get_state
+            from ..reindex_state import _get_state, get_deferred_save_lock
             from ._indexing_pipeline import deferred_summarize
 
             # Check 1: has a newer reindex started while we were parsing?
             if _get_state(repo_full).deferred_generation != gen:
+                logger.debug(
+                    "Deferred summarize gen=%d abandoned for %s (generation advanced before summarize)",
+                    gen, repo_full,
+                )
                 return
 
             summarized = deferred_summarize(symbols, file_contents, use_ai_summaries=True)
             if not summarized:
                 return
 
-            # Check 2: has another reindex started while we were summarizing?
-            if _get_state(repo_full).deferred_generation != gen:
-                return
+            # Check 2 + save are held under the deferred-save lock (T7).
+            # mark_reindex_start also acquires this lock before bumping the generation,
+            # so the check and the write are atomic with respect to new reindexes:
+            # either we write before the new gen is bumped, or we see the new gen and abort.
+            save_lock = get_deferred_save_lock(repo_full)
+            with save_lock:
+                if _get_state(repo_full).deferred_generation != gen:
+                    logger.debug(
+                        "Deferred summarize gen=%d abandoned for %s (generation advanced before save)",
+                        gen, repo_full,
+                    )
+                    return
 
-            # Update only the symbol summaries (empty change lists → INSERT OR REPLACE updates existing rows)
-            try:
-                store.incremental_save(
-                    owner=owner, name=repo_name,
-                    changed_files=[], new_files=[], deleted_files=[],
-                    new_symbols=summarized,
-                    raw_files={},
-                )
-                logger.info("Deferred AI summarization saved %d symbols for %s", len(summarized), repo_full)
-            except Exception as e:
-                logger.warning("Deferred summarization failed for %s: %s", repo_full, e)
+                # Update only the symbol summaries (empty change lists → INSERT OR REPLACE updates existing rows)
+                try:
+                    store.incremental_save(
+                        owner=owner, name=repo_name,
+                        changed_files=[], new_files=[], deleted_files=[],
+                        new_symbols=summarized,
+                        raw_files={},
+                    )
+                    logger.info(
+                        "Deferred AI summarization gen=%d saved %d symbols for %s",
+                        gen, len(summarized), repo_full,
+                    )
+                except Exception as e:
+                    logger.warning("Deferred summarization failed for %s: %s", repo_full, e)
 
         # ── Fast path: watcher-driven incremental reindex ──
         # When the watcher provides the exact change set, skip full directory
@@ -1001,6 +1017,7 @@ def index_folder(
         content_dir.mkdir(parents=True, exist_ok=True)
 
         no_symbols_files: list[str] = []
+        _languages_with_symbols: set[str] = set()
         for rel_path in source_file_list:
             content = _read_file(rel_path)
             if content is None:
@@ -1026,6 +1043,7 @@ def index_folder(
                 if symbols:
                     all_symbols.extend(symbols)
                     symbols_by_file[rel_path].extend(symbols)
+                    _languages_with_symbols.add(language)
                 else:
                     no_symbols_files.append(rel_path)
                     logger.debug("NO SYMBOLS: %s", rel_path)
@@ -1135,6 +1153,12 @@ def index_folder(
             package_names=_pkg_names,
         )
 
+        # Identify languages that were indexed (symbols found) but have no import extractor
+        _missing_import_extractors = sorted(
+            lang for lang in _languages_with_symbols
+            if lang not in _IMPORT_EXTRACTORS
+        )
+
         result = {
             "success": True,
             "repo": index.repo,
@@ -1150,6 +1174,12 @@ def index_folder(
             "no_symbols_count": len(no_symbols_files),
             "no_symbols_files": no_symbols_files[:50],  # Show up to 50 for inspection
         }
+        if _missing_import_extractors:
+            result["missing_extractors"] = _missing_import_extractors
+            result.setdefault("parse_warnings", []).append(
+                f"Import graph incomplete for: {', '.join(_missing_import_extractors)}. "
+                "Dead code and dependency analysis may be less accurate for these languages."
+            )
 
         # Report context enrichment stats from all active providers
         if active_providers:

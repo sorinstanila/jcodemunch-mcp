@@ -20,6 +20,18 @@ class TestCountParams:
     def test_empty_string(self):
         assert _count_params("") == 0
 
+    def test_c_void_zero_params(self):
+        # C convention: void foo(void) means zero parameters, not one
+        assert _count_params("void foo(void)") == 0
+
+    def test_c_void_pointer_not_zero(self):
+        # void* is a parameter type — should NOT be zero
+        assert _count_params("void foo(void *ptr)") == 1
+
+    def test_c_void_pointer_multi(self):
+        # void* among multiple params — count correctly
+        assert _count_params("void foo(void *a, int b)") == 2
+
 
 class TestMaxNestingDepth:
     def test_flat_code(self):

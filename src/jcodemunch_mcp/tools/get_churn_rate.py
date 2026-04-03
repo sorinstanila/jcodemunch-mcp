@@ -165,7 +165,11 @@ def get_churn_rate(
         "days": days,
         "churn_per_week": churn_per_week,
         "assessment": assessment,
-        "_meta": {"timing_ms": round((time.perf_counter() - t0) * 1000, 1)},
+        "_meta": {
+            "timing_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "methodology": "git_log",
+            "confidence_level": "high",
+        },
     }
     if sym_name:
         result["symbol_name"] = sym_name

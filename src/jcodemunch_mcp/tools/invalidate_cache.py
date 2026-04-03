@@ -4,8 +4,8 @@ from typing import Optional
 
 from ..storage import IndexStore
 from .. import config as _cfg
-from ..parser.imports import _alias_map_cache
-from ._utils import resolve_repo, _bare_name_cache
+from ..parser.imports import _alias_map_cache, _ALIAS_MAP_LOCK, _sql_stem_cache, _SQL_STEM_LOCK
+from ._utils import resolve_repo, _bare_name_cache, _BARE_NAME_LOCK
 
 
 def invalidate_cache(
@@ -40,14 +40,19 @@ def invalidate_cache(
 
     deleted = store.delete_index(owner, name)
 
-    # Clear all in-process caches not touched by delete_index (X1 / C4-B)
-    _cfg._REPO_PATH_CACHE.clear()
-    _bare_name_cache.pop(str(store.base_path), None)
-    if source_root:
-        _alias_map_cache.pop(source_root, None)
-        with _cfg._CONFIG_LOCK:
+    # Clear all in-process caches (X1 / C4-B / T4.5)
+    with _cfg._CONFIG_LOCK:
+        _cfg._REPO_PATH_CACHE.clear()
+        if source_root:
             _cfg._PROJECT_CONFIGS.pop(source_root, None)
             _cfg._PROJECT_CONFIG_HASHES.pop(source_root, None)
+    with _BARE_NAME_LOCK:
+        _bare_name_cache.pop(str(store.base_path), None)
+    with _SQL_STEM_LOCK:
+        _sql_stem_cache.clear()
+    if source_root:
+        with _ALIAS_MAP_LOCK:
+            _alias_map_cache.pop(source_root, None)
 
     if deleted:
         return {

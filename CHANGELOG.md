@@ -4,6 +4,80 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.21.21] - 2026-04-02
+
+### Changed
+- **`files_to_remove` kept as `set` in `incremental_save` (T8)** — `sqlite_store.py` no longer converts the union of `deleted_files` and `changed_files` to a list. The set is preserved through the function and passed to `_patch_index_from_delta`, making membership tests in the hot path (`in files_to_remove`) O(1) instead of O(n). sqlite3 calls receive `tuple(files_to_remove)`.
+- **Defer `stat()` until after LRU key check in `load_index` (T9)** — `stat()` is now only called when the cache key is already present; cold-start loads skip the pre-load `stat()` syscall entirely. `_CACHE_MAX_SIZE` raised from 16 → 32.
+- **Cap `_REPO_PATH_CACHE` at 512 entries (T23)** — `config.py` trims the oldest entries after each `update()` so the cache cannot grow unbounded in long-running server sessions.
+- **`expanduser()` on startup storage path log (T24)** — all three transport startup log lines (`stdio`, `sse`, `streamable-http`) now call `os.path.expanduser()` on the `CODE_INDEX_PATH` value so the logged path shows the real expanded path on Windows instead of `~/.code-index/`.
+
+## [1.21.20] - 2026-04-02
+
+### Added
+- **Dart import extractor (T19)** — `imports.py` now includes `_extract_dart_imports` (regex on `import`/`export` statements) registered as `"dart"` in `_LANGUAGE_EXTRACTORS`. Dart files no longer appear in `missing_extractors` after indexing. 9 new tests in `tests/test_dart_imports.py`; `test_parse_warnings.py` updated to use Elixir as the canonical missing-extractor example.
+- **LANGUAGE_SUPPORT.md expanded (T20)** — added full extraction rows for CSS, SCSS, SASS, YAML, Ansible, OpenAPI, and JSON; fixed C# entry to list `constant (property/field/event)` symbol types (were incorrectly documented as "not indexed"); corrected CSS row previously listed only under "text search indexing"; SASS entry now documents the CSS-parser fallback.
+- **Hypothesis property-based tests (T22)** — `tests/test_property_based.py` with 4 tests across 3 invariant classes: **ID uniqueness** (`TestIdUniqueness` — all symbol IDs in a freshly indexed folder are unique); **Incremental idempotency** (`TestIncrementalIdempotency` — indexing the same files twice yields the same symbol IDs and counts); **No self-imports** (`TestNoSelfImports` — no file in the import graph lists itself as an importer). `hypothesis>=6.0.0` added to dev dependency group. 4 new tests, 90 Hypothesis examples per run.
+
+### Changed
+- **`JCODEMUNCH_EXTRA_EXTENSIONS` valid language names** (T21) — added `scss`, `sass`, `less`, `styl`, `yaml`, `ansible`, `json`, `openapi`, `luau` to the documented list in LANGUAGE_SUPPORT.md.
+
+## [1.21.19] - 2026-04-02
+
+### Added
+- **Methodology disclosure on all 6 analytical tools (T15)** — every analytical tool response now includes `_meta.methodology` and `_meta.confidence_level`. Values: `get_call_hierarchy` + `get_impact_preview` → `methodology: "text_heuristic"`, `confidence_level: "low"`; `get_symbol_complexity` → `methodology: "stored_metrics"`, `confidence_level: "medium"`; `get_churn_rate` → `methodology: "git_log"`, `confidence_level: "high"`; `get_hotspots` → `methodology: "complexity_x_churn"`, `confidence_level: "medium"`; `get_repo_health` → `methodology: "aggregate"`, `confidence_level: "medium"`; `get_dead_code_v2` → `methodology: "multi_signal"`, `confidence_level: "medium"`. 18 new tests in `tests/test_meta_disclosure.py`.
+- **Import-gap signal in `index_folder` (T17)** — `index_folder` now reports `missing_extractors` (sorted list of languages that have symbol extraction but no import extractor) and `parse_warnings` when import graph coverage is incomplete. Example: indexing a folder with `.dart` files yields `missing_extractors: ["dart"]` and a human-readable `parse_warnings` entry. 4 new tests in `tests/test_parse_warnings.py`.
+- **`framework_warning` in `get_dead_code_v2` (T18)** — when BFS finds zero standard entry points (`main.py`, `app.py`, etc.), all files are unreachable from entry points and Signal 1 fires for every symbol, inflating dead code counts. `get_dead_code_v2` now includes `framework_warning` in that case, advising callers to pass `entry_point_patterns`. 5 new tests in `tests/test_parse_warnings.py`.
+
+### Fixed
+- **Parameter count off-by-one for C-style zero-param functions (T16)** — `_count_params` in `parser/complexity.py` treated `void foo(void)` as a one-parameter function because `"void"` was a non-empty `params_str` with no commas, yielding `commas + 1 = 1`. Added a special case: `params_str == "void"` → return 0, matching the C/C++ convention that `(void)` declares zero parameters. `void*` and multi-param signatures containing `void` are unaffected. 3 new tests in `tests/test_complexity.py`.
+
+## [1.21.18] - 2026-04-02
+
+### Added
+- **Correctness fixture library (T12)** — `tests/conftest.py` now exports three shared pytest fixtures (`small_index`, `medium_index`, `hierarchy_index`) that build deterministic synthetic Python repos with documented ground-truth expected outputs. Used across multiple test modules as the canonical in-process test corpus.
+- **Tests for `get_class_hierarchy` (T13)** — 22 new tests in `tests/test_class_hierarchy.py` covering: `_parse_bases` unit tests (Python single/multi base, Java extends/implements, combined, lowercase filter, empty); hierarchy BFS error cases (repo not indexed, class not found); ancestor direction (no ancestors for root, direct parent, transitive chain, BFS nearest-first order); descendant direction (all descendants of root, direct children, leaf has none); meta fields (case-insensitive lookup, timing, class info, external base recorded as `"(external)"`).
+- **Tests for `get_related_symbols` (T13)** — 14 new tests in `tests/test_related_symbols.py` covering: `_tokenize_name` unit tests (snake_case, camelCase, single word, short-token filter, lowercase); error cases (repo not indexed, symbol not found); same-file grouping (co-located symbols are related, scores positive); name-token overlap scoring; `max_results` cap; meta fields (timing, target symbol in response, required entry fields).
+- **Tests for `get_symbol_diff` (T13)** — 15 new tests in `tests/test_symbol_diff.py` covering: error cases (repo A not indexed, repo B not indexed); added symbols (detected, count matches list); removed symbols (detected, count matches list); unchanged symbols (not in added/removed, identical repo → all unchanged); changed symbols (signature change detected, both signatures present); meta fields (timing, symbol counts, repo identifiers).
+- **Tests for `suggest_queries` (T13)** — 11 new tests in `tests/test_suggest_queries.py` covering: error cases (repo not indexed, empty index); small repo stats (symbol count, file count, kind distribution, language distribution, example queries non-empty, required query fields); medium repo stats (file count, most_imported file structure, class+function kinds, repo field, timing meta).
+- **Tests for rate-limit middleware (T13)** — 10 new tests in `tests/test_rate_limit.py` covering: factory returns `None` when `JCODEMUNCH_RATE_LIMIT` is 0, unset, invalid, or negative; returns non-`None` `Middleware` when limit is positive; sliding-window bucket logic: under-limit all allowed, over-limit rejected, expired entries evicted, limit=1 allows first denies second.
+- **In-process perf benchmarks with latency budgets (T14)** — `tests/test_search_perf.py` rewritten from an external-index-dependent skip-if-not-indexed pattern to a fully self-contained suite. Builds a 5-file, 20+ symbol synthetic repo at module scope. New latency assertions: cold search < 2000 ms, warm search < 500 ms (BM25 cache benefit). Correctness assertions: result order stable across two consecutive calls, scores stable with `debug=True`, relevant symbol appears in top-5 for known query, all queries return non-empty results. Zero `pytest.skip` in the file.
+
+### Changed
+- **`tests/test_search_perf.py`** — removed `_require_index()` / `pytest.skip` pattern that caused CI-skip when `jcodemunch-mcp` was not indexed locally. Tests now run unconditionally against the synthetic in-process index.
+
+## [1.21.17] - 2026-04-02
+
+### Fixed
+- **BM25 `avgdl` inflation corrected (T10)** — `_sym_tokens` computed `_dl` (document length) as `len(tokens)` where `tokens` is the weighted repeated bag (field-repetition multipliers make the name appear 3× in the bag, signature 2×, etc.). This inflated `_dl` and therefore `avgdl`, distorting the BM25 length-normalisation term `K`. Fixed by using `len(set(tokens))` — the unique-token count — consistent with how document-frequency (`df`) is already computed via `for t in set(toks)`. Symbols with overlap across name/signature/summary fields (the common case) were previously penalised as "long documents" when they are not.
+- **BM25 rebuild canonical `_dl` enforcement (T11)** — `_compute_bm25` now overwrites `sym["_dl"]` with `len(unique_toks)` on every corpus rebuild. Previously the function used the cached `_dl` from `_sym_tokens`, meaning retained symbols carrying a pre-T10 `_dl` value (the inflated bag length) would make `avgdl` inconsistent with the new formula. The forced rewrite ensures the corpus and all scoring are internally consistent even when the BM25 cache is rebuilt over a mix of freshly computed and carried-forward symbols (e.g., after deferred AI summarisation). 11 new correctness tests added (`tests/test_bm25_correctness.py`).
+
+## [1.21.16] - 2026-04-02
+
+### Fixed
+- **Watcher hash-cache double-read race eliminated (T6)** — after each incremental reindex the watcher previously re-read each changed file to compute the new content hash for its in-memory cache. If the file changed again between `index_folder`'s internal read and the watcher's post-reindex re-read, the cache recorded the wrong (newer) hash while the index held the older content. The *next* watchfiles event would then deliver `old_hash=<newer>`, `index_folder` would hash the file, see no difference, and silently skip re-parsing a stale index entry. Fixed by replacing per-file re-reads with a single `_build_hash_cache()` call that reads hashes from the store `index_folder` just wrote — the single authoritative source of truth. Removed the now-dead `_update_hash_cache` / `_remove_from_hash_cache` helpers and the unused `_file_hash` import.
+
+## [1.21.15] - 2026-04-02
+
+### Fixed
+- **Deferred-summarize write-lock race eliminated (T7)** — a narrow but real race existed between the deferred summarization thread's generation check ("check 2") and its `incremental_save` call. A concurrent `mark_reindex_start` could bump `deferred_generation` and write a fresh index between those two points; the deferred thread would then overwrite it with stale AI summaries from the previous parse generation. Fixed by introducing a per-repo `threading.Lock` (`_repo_deferred_save_locks` in `reindex_state.py`). The deferred thread holds this lock across check 2 + save; `mark_reindex_start` holds it while bumping `deferred_generation`. This makes check-and-save atomic with respect to generation bumps: either the deferred thread saves before the new generation is written, or it sees the new generation and self-aborts. Added `gen=N` to deferred-summarize log messages so abandoned and completed saves are distinguishable in debug output (pre-T7 instrumentation).
+
+## [1.21.14] - 2026-04-02
+
+### Fixed
+- **Threading locks added to all in-process caches (T5)** — four module-level caches were missing `threading.Lock` guards, leaving them vulnerable to data races under concurrent MCP requests (HTTP transport, multi-client stdio). Now protected:
+  - `_bare_name_cache` (`tools/_utils.py`) — new `_BARE_NAME_LOCK`; check and write are each under the lock; expensive `list_repos()` I/O happens between the two lock acquisitions so the lock is never held during I/O.
+  - `_REPO_PATH_CACHE` (`config.py`) — now protected by the existing `_CONFIG_LOCK`; reads (check) and bulk writes (`update`) are each atomic under the lock; store I/O happens outside.
+  - `_alias_map_cache` (`parser/imports.py`) — new `_ALIAS_MAP_LOCK`; same check-then-build-then-write pattern.
+  - `_sql_stem_cache` (`parser/imports.py`) — new `_SQL_STEM_LOCK`; same pattern.
+- **`invalidate_cache` now clears all 5 in-process caches under their locks (T4.5)** — previously `_sql_stem_cache` was not cleared on `invalidate_cache`, leaving stale SQL stem mappings across re-indexes. Also, `_REPO_PATH_CACHE.clear()` and `_PROJECT_CONFIGS.pop()` were called outside `_CONFIG_LOCK`. All five caches (`_REPO_PATH_CACHE`, `_PROJECT_CONFIGS`, `_PROJECT_CONFIG_HASHES`, `_bare_name_cache`, `_sql_stem_cache`, `_alias_map_cache`) are now cleared under their respective locks.
+
+## [1.21.13] - 2026-04-02
+
+### Fixed
+- **`truncated` flag now correct when `token_budget` packing drops results** — in the BM25 search path, the flag was computed using `candidates_scored > len(scored_results)` after the fuzzy augmentation pass, meaning fuzzy results appended after budget packing could mask dropped BM25 results and produce `truncated=False` incorrectly. Now tracked as a separate `budget_truncated` boolean computed immediately after packing; the final flag is `candidates_scored > heap_count or budget_truncated`. The semantic search path was already correct.
+- **Call graph `"source"` label corrected** — `get_call_hierarchy` and `get_impact_preview` both returned `"source": "ast"` in `_meta`, implying type-resolved AST analysis. The implementation is word-token regex matching on raw file text. Label changed to `"source": "text_heuristic"` with updated tip text to accurately describe the approach and its limitations (false positives for common names, no dynamic dispatch).
+
 ## [1.21.12] - 2026-04-02
 
 ### Added

@@ -1,6 +1,7 @@
 """Shared helpers for tool modules."""
 
 import logging
+import threading
 from typing import Optional
 
 from ..storage import IndexStore
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 # Invalidated whenever the base_path directory mtime changes (repo added/removed).
 # ---------------------------------------------------------------------------
 _bare_name_cache: dict[str, tuple[float, dict[str, list[str]]]] = {}
+_BARE_NAME_LOCK = threading.Lock()
 
 
 def _get_bare_name_map(store: IndexStore) -> dict[str, list[str]]:
@@ -29,10 +31,12 @@ def _get_bare_name_map(store: IndexStore) -> dict[str, list[str]]:
     except OSError:
         mtime = 0.0
 
-    cached = _bare_name_cache.get(path_str)
-    if cached and cached[0] == mtime:
-        return cached[1]
+    with _BARE_NAME_LOCK:
+        cached = _bare_name_cache.get(path_str)
+        if cached and cached[0] == mtime:
+            return cached[1]
 
+    # Miss: rebuild without holding the lock (list_repos does I/O)
     mapping: dict[str, list[str]] = {}
     for repo_entry in store.list_repos():
         owner_name = repo_entry["repo"]
@@ -43,7 +47,8 @@ def _get_bare_name_map(store: IndexStore) -> dict[str, list[str]]:
 
     # Deduplicate and sort so output is deterministic
     mapping = {k: sorted(set(v)) for k, v in mapping.items()}
-    _bare_name_cache[path_str] = (mtime, mapping)
+    with _BARE_NAME_LOCK:
+        _bare_name_cache[path_str] = (mtime, mapping)
     return mapping
 
 

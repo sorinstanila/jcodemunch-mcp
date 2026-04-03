@@ -2215,7 +2215,7 @@ async def run_stdio_server():
     logger.info(
         "startup version=%s transport=stdio storage=%s ai_summaries=%s",
         __version__,
-        os.environ.get("CODE_INDEX_PATH", "~/.code-index/"),
+        os.path.expanduser(os.environ.get("CODE_INDEX_PATH", "~/.code-index/")),
         _default_use_ai_summaries(),
     )
     try:
@@ -2350,7 +2350,7 @@ async def run_sse_server(host: str, port: int):
     logger.info(
         "startup version=%s transport=sse host=%s port=%d storage=%s",
         __version__, host, port,
-        os.environ.get("CODE_INDEX_PATH", "~/.code-index/"),
+        os.path.expanduser(os.environ.get("CODE_INDEX_PATH", "~/.code-index/")),
     )
     config = uvicorn.Config(starlette_app, host=host, port=port, log_level="warning")
     await uvicorn.Server(config).serve()
@@ -2408,7 +2408,7 @@ async def run_streamable_http_server(host: str, port: int):
     logger.info(
         "startup version=%s transport=streamable-http host=%s port=%d storage=%s",
         __version__, host, port,
-        os.environ.get("CODE_INDEX_PATH", "~/.code-index/"),
+        os.path.expanduser(os.environ.get("CODE_INDEX_PATH", "~/.code-index/")),
     )
     config = uvicorn.Config(starlette_app, host=host, port=port, log_level="warning")
     await uvicorn.Server(config).serve()

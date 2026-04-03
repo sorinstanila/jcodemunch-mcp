@@ -124,7 +124,7 @@ class _CacheEntry(NamedTuple):
 
 _index_cache: OrderedDict[tuple[str, str], _CacheEntry] = OrderedDict()
 _cache_lock = threading.Lock()
-_CACHE_MAX_SIZE = 16
+_CACHE_MAX_SIZE = 32
 
 
 def _cache_get(owner: str, name: str, mtime_ns: int) -> Optional["CodeIndex"]:
@@ -526,14 +526,19 @@ class SQLiteIndexStore:
         if not db_path.exists():
             return None
 
-        # Check in-memory cache (mirrors old @lru_cache on JSON load)
-        try:
-            mtime_ns = _db_mtime_ns(db_path)
-        except OSError:
-            return None  # file was deleted between exists() and stat()
-        cached = _cache_get(owner, safe_name, mtime_ns)
-        if cached is not None:
-            return cached
+        # Check in-memory cache (mirrors old @lru_cache on JSON load).
+        # Stat only when the key is present — avoids a syscall on cold starts.
+        key = (owner, safe_name)
+        with _cache_lock:
+            _has_key = key in _index_cache
+        if _has_key:
+            try:
+                mtime_ns = _db_mtime_ns(db_path)
+            except OSError:
+                return None  # file was deleted between exists() and stat()
+            cached = _cache_get(owner, safe_name, mtime_ns)
+            if cached is not None:
+                return cached
 
         conn = self._connect(db_path)
         try:
@@ -605,10 +610,10 @@ class SQLiteIndexStore:
             conn.execute("BEGIN")
 
             # Delete symbols for changed + deleted files
-            files_to_remove = list(set(deleted_files) | set(changed_files))
+            files_to_remove: set[str] = set(deleted_files) | set(changed_files)
             if files_to_remove:
                 placeholders = ",".join("?" * len(files_to_remove))
-                conn.execute(f"DELETE FROM symbols WHERE file IN ({placeholders})", files_to_remove)
+                conn.execute(f"DELETE FROM symbols WHERE file IN ({placeholders})", tuple(files_to_remove))
 
             # Preserve existing hash/mtime for changed files before deleting them
             preserved: dict[str, dict] = {}

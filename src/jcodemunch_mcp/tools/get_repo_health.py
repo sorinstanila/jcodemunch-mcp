@@ -163,5 +163,7 @@ def get_repo_health(
         "_meta": {
             "timing_ms": round(elapsed, 1),
             "days": days,
+            "methodology": "aggregate",
+            "confidence_level": "medium",
         },
     }

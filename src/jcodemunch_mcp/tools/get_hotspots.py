@@ -169,7 +169,11 @@ def get_hotspots(
         "days": days,
         "git_available": git_available,
         "hotspots": top,
-        "_meta": {"timing_ms": round((time.perf_counter() - t0) * 1000, 1)},
+        "_meta": {
+            "timing_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "methodology": "complexity_x_churn",
+            "confidence_level": "medium",
+        },
     }
     if note:
         result["note"] = note
