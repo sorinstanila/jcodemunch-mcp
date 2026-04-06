@@ -102,60 +102,88 @@ class SessionJournal:
         self,
         max_files: int = 50,
         max_queries: int = 20,
+        max_edits: int = 20,  # Add max_edits parameter to support the get_session_snapshot use case
+        sort_by: str = "timestamp",  # "timestamp" (by last_ts) or "frequency" (by access frequency count)
     ) -> dict:
         """Get session context summary.
 
         Args:
             max_files: Maximum number of files to return in files_accessed.
             max_queries: Maximum number of queries to return in recent_searches.
+            max_edits: Maximum number of files to return in files_edited.
+            sort_by: How to sort - 'timestamp' (by last_ts) or 'frequency' (by access frequency count).
 
         Returns:
             Dict with files_accessed, recent_searches, files_edited, tool_calls,
             session_duration_s, total_unique_files, total_unique_queries.
         """
         with self._lock:
-            # Sort files by last_ts descending, take top N
-            sorted_files = sorted(
-                self._files.items(),
-                key=lambda x: x[1].get("last_ts", 0),
-                reverse=True,
-            )[:max_files]
+            # Sort files based on the sort_by parameter
+            if sort_by == "frequency":
+                sorted_files = sorted(
+                    self._files.items(),
+                    key=lambda x: x[1]["reads"],  # Sort by read count
+                    reverse=True,
+                )
+            else:  # default to "timestamp"
+                sorted_files = sorted(
+                    self._files.items(),
+                    key=lambda x: x[1].get("last_ts", 0),  # Sort by timestamp
+                    reverse=True,
+                )
+            # Take top N after sorting
             files_accessed = [
                 {
                     "file": fp,
                     "reads": data["reads"],
                     "last_tool": data["last_tool"],
                 }
-                for fp, data in sorted_files
+                for fp, data in sorted_files[:max_files]
             ]
 
-            # Sort queries by last_ts descending, take top N
-            sorted_queries = sorted(
-                self._queries.items(),
-                key=lambda x: x[1].get("last_ts", 0),
-                reverse=True,
-            )[:max_queries]
+            # Sort queries based on the sort_by parameter
+            if sort_by == "frequency":
+                sorted_queries = sorted(
+                    self._queries.items(),
+                    key=lambda x: x[1]["count"],  # Sort by query count
+                    reverse=True,
+                )
+            else:  # default to "timestamp"
+                sorted_queries = sorted(
+                    self._queries.items(),
+                    key=lambda x: x[1].get("last_ts", 0),  # Sort by timestamp
+                    reverse=True,
+                )
+            # Take top N after sorting
             recent_searches = [
                 {
                     "query": q,
                     "count": data["count"],
                     "result_count": data["result_count"],
                 }
-                for q, data in sorted_queries
+                for q, data in sorted_queries[:max_queries]
             ]
 
-            # Sort edits by last_ts descending
-            sorted_edits = sorted(
-                self._edits.items(),
-                key=lambda x: x[1].get("last_ts", 0),
-                reverse=True,
-            )
+            # For consistency, we need to sort edits as well and respect max_edits
+            if sort_by == "frequency":
+                sorted_edits = sorted(
+                    self._edits.items(),
+                    key=lambda x: x[1]["edits"],  # Sort by edit count
+                    reverse=True,
+                )
+            else:  # default to "timestamp"
+                sorted_edits = sorted(
+                    self._edits.items(),
+                    key=lambda x: x[1].get("last_ts", 0),  # Sort by timestamp
+                    reverse=True,
+                )
+            # Take top N after sorting for edits
             files_edited = [
                 {
                     "file": fp,
                     "edits": data["edits"],
                 }
-                for fp, data in sorted_edits
+                for fp, data in sorted_edits[:max_edits]
             ]
 
             return {
@@ -163,6 +191,101 @@ class SessionJournal:
                 "recent_searches": recent_searches,
                 "files_edited": files_edited,
                 "tool_calls": dict(self._tool_calls),
+                "session_duration_s": round(time.time() - self._start, 2),
+                "total_unique_files": len(self._files),
+                "total_unique_queries": len(self._queries),
+            }
+
+
+    def _get_files_edited_sorted(self, sort_by: str, max_edits: int):
+        """Helper method to get edited files sorted by edit count or timestamp."""
+        with self._lock:
+            # Sort edits based on the sort_by parameter
+            if sort_by == "read_count":  # For edited files, this means by edit count
+                sorted_edits = sorted(
+                    self._edits.items(),
+                    key=lambda x: x[1]["edits"],  # Sort by edit count
+                    reverse=True,
+                )
+            else:  # default to "timestamp"
+                sorted_edits = sorted(
+                    self._edits.items(),
+                    key=lambda x: x[1].get("last_ts", 0),  # Sort by timestamp
+                    reverse=True,
+                )
+            # Take top N after sorting
+            files_edited = [
+                {
+                    "file": fp,
+                    "edits": data["edits"],
+                }
+                for fp, data in sorted_edits[:max_edits]
+            ]
+            
+            return files_edited
+
+    def get_session_snapshot_context(
+        self,
+        max_files: int = 10,
+        max_queries: int = 5,
+        max_edits: int = 10,
+        sort_by: str = "read_count",  # By default, sort by read/edit count for session snapshot
+    ) -> dict:
+        """Get session context specifically tailored for session snapshots (with read_count sorts).
+        
+        Args:
+            max_files: Maximum number of files to return in files_accessed.
+            max_queries: Maximum number of queries to return in recent_searches.
+            max_edits: Maximum number of files to return in files_edited.
+            sort_by: How to sort (default "read_count" for session snapshots).
+            
+        Returns:
+            Dict with properly sorted context for session snapshots.
+        """
+        with self._lock:
+            # Get properly sorted components
+            files_accessed = [
+                {
+                    "file": fp,
+                    "reads": data["reads"],
+                    "last_tool": data["last_tool"],
+                }
+                for fp, data in sorted(
+                    self._files.items(),
+                    key=lambda x: x[1]["reads"],  # Sort by read count
+                    reverse=True,
+                )[:max_files]
+            ]
+
+            recent_searches = [
+                {
+                    "query": q,
+                    "count": data["count"],
+                    "result_count": data["result_count"],
+                }
+                for q, data in sorted(
+                    self._queries.items(),
+                    key=lambda x: x[1]["count"],  # Sort by query count
+                    reverse=True,
+                )[:max_queries]
+            ]
+
+            files_edited = [
+                {
+                    "file": fp,
+                    "edits": data["edits"],
+                }
+                for fp, data in sorted(
+                    self._edits.items(),
+                    key=lambda x: x[1]["edits"],  # Sort by edit count
+                    reverse=True,
+                )[:max_edits]
+            ]
+
+            return {
+                "files_accessed": files_accessed,
+                "recent_searches": recent_searches,
+                "files_edited": files_edited,
                 "session_duration_s": round(time.time() - self._start, 2),
                 "total_unique_files": len(self._files),
                 "total_unique_queries": len(self._queries),

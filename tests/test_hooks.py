@@ -15,6 +15,7 @@ from jcodemunch_mcp.cli.hooks import (
     _MIN_SIZE_BYTES,
     run_pretooluse,
     run_posttooluse,
+    run_precompact,
 )
 
 
@@ -235,6 +236,56 @@ class TestPostToolUse:
 
 
 # ---------------------------------------------------------------------------
+# PreCompact tests 
+# ---------------------------------------------------------------------------
+
+class TestPreCompact:
+    """Tests for run_precompact()."""
+    
+    def test_precompact_empty_stdin(self):
+        """Empty stdin returns exit 0, no stdout."""
+        rc, out = _run_with_stdin(run_precompact, "")
+        assert rc == 0
+        assert out == ""
+    
+    def test_precompact_invalid_json(self):
+        """Invalid JSON stdin returns exit 0."""
+        rc, out = _run_with_stdin(run_precompact, "invalid json")
+        assert rc == 0
+        assert out == ""
+    
+    def test_precompact_with_session_data(self, monkeypatch):
+        """Populate journal, run hook, verify JSON output has systemMessage."""
+        from jcodemunch_mcp.tools.session_journal import get_journal
+        
+        # Record some session data
+        journal = get_journal()
+        journal.record_read("src/server.py", "get_file_outline")
+        journal.record_search("test_query", 2)
+        journal.record_edit("src/test.py")
+        
+        # Mock the get_session_snapshot function to return predictable data
+        def mock_get_session_snapshot(max_files=10, max_searches=5, max_edits=10, include_negative_evidence=True, storage_path=None):
+            return {
+                "snapshot": "## Session Snapshot (jCodemunch)\n**Duration:** 2m | **Files explored:** 1 | **Searches:** 1\n\n### Focus files (most accessed)\n- src/server.py (1 reads, last: get_file_outline)\n\n### Key searches\n- \"test_query\" → 2 results",
+                "structured": {"files_accessed": [], "key_searches": [], "dead_ends": []},
+                "_meta": {"timing_ms": 1.0}
+            }
+        
+        monkeypatch.setattr(
+            "jcodemunch_mcp.tools.get_session_snapshot.get_session_snapshot", 
+            mock_get_session_snapshot
+        )
+        
+        rc, out = _run_with_stdin(run_precompact, '{"hook_event_name": "PreCompact"}')
+        assert rc == 0
+        assert out != ""
+        result = json.loads(out)
+        assert "systemMessage" in result
+        assert "Session Snapshot" in result["systemMessage"]
+
+
+# ---------------------------------------------------------------------------
 # Init integration: enforcement hooks
 # ---------------------------------------------------------------------------
 
@@ -251,16 +302,19 @@ class TestEnforcementHooksInstall:
         with mock.patch("jcodemunch_mcp.cli.init._settings_json_path", return_value=settings):
             msg = install_enforcement_hooks(dry_run=False, backup=False)
 
-        assert "PreToolUse" in msg or "PostToolUse" in msg
+        assert "PreToolUse" in msg or "PostToolUse" in msg or "PreCompact" in msg
         data = json.loads(settings.read_text(encoding="utf-8"))
         hooks = data["hooks"]
         assert "PreToolUse" in hooks
         assert "PostToolUse" in hooks
+        assert "PreCompact" in hooks
         # Verify matchers
         pre_matcher = hooks["PreToolUse"][0]["matcher"]
         post_matcher = hooks["PostToolUse"][0]["matcher"]
+        precompact_matcher = hooks["PreCompact"][0]["matcher"]
         assert pre_matcher == "Read"
         assert post_matcher == "Edit|Write"
+        assert precompact_matcher == ""  # PreCompact hook has empty matcher
 
     def test_idempotent(self, tmp_path):
         """Running install_enforcement_hooks twice doesn't duplicate entries."""
@@ -296,6 +350,7 @@ class TestEnforcementHooksInstall:
         data = json.loads(settings.read_text(encoding="utf-8"))
         assert "SessionStart" in data["hooks"]  # preserved
         assert "PreToolUse" in data["hooks"]     # added
+        assert "PostToolUse" in data["hooks"]    # added
 
     def test_dry_run(self, tmp_path):
         """Dry run doesn't write anything."""

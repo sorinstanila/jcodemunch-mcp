@@ -103,6 +103,10 @@ _ENFORCEMENT_HOOKS = {
         "matcher": "Edit|Write",
         "hooks": [{"type": "command", "command": "jcodemunch-mcp hook-posttooluse"}],
     }],
+    "PreCompact": [{
+        "matcher": "",
+        "hooks": [{"type": "command", "command": "jcodemunch-mcp hook-precompact"}],
+    }],
 }
 
 # Cursor rules use MDC format (frontmatter + markdown).
@@ -436,7 +440,7 @@ def install_enforcement_hooks(*, dry_run: bool = False, backup: bool = True) -> 
     """
     path = _settings_json_path()
     data = _read_json(path)
-    added = _merge_hooks(data, _ENFORCEMENT_HOOKS, "jcodemunch-mcp hook-p")  # matches hook-pretooluse & hook-posttooluse
+    added = _merge_hooks(data, _ENFORCEMENT_HOOKS, "jcodemunch-mcp hook-p")  # matches hook-pretooluse & hook-posttooluse & hook-precompact
 
     if not added:
         return f"  enforcement hooks already present in {path}"

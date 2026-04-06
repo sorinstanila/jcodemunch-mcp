@@ -48,7 +48,7 @@ class SessionState:
         """
         with self._lock:
             # Get journal context
-            ctx = journal.get_context(max_files=1000, max_queries=1000)
+            ctx = journal.get_context(max_files=1000, max_queries=1000, max_edits=1000)
             
             # Build journal data
             journal_data = {

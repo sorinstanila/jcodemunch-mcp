@@ -31,9 +31,10 @@ def get_session_context(
     from .session_journal import get_journal
     import time
 
+
     start = time.perf_counter()
     journal = get_journal()
-    result = journal.get_context(max_files=max_files, max_queries=max_queries)
+    result = journal.get_context(max_files=max_files, max_queries=max_queries, max_edits=20)  # Use default for backward compatibility
     result["_meta"] = {
         "timing_ms": round((time.perf_counter() - start) * 1000, 1),
     }

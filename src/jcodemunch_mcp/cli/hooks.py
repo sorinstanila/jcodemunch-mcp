@@ -154,3 +154,37 @@ def run_posttooluse() -> int:
         pass  # jcodemunch-mcp not in PATH → skip silently
 
     return 0
+
+
+def run_precompact() -> int:
+    """PreCompact hook: generate session snapshot before context compaction.
+
+    Reads hook JSON from stdin. Builds a compact snapshot of the current
+    session state and returns it as a message for context injection.
+
+    Returns exit code (always 0 — errors are swallowed to avoid blocking).
+    """
+    try:
+        data = json.load(sys.stdin)  # Read hook JSON (may contain session info)
+    except (json.JSONDecodeError, ValueError):
+        return 0
+
+    # Build snapshot in-process (no MCP round-trip needed)
+    try:
+        from jcodemunch_mcp.tools.get_session_snapshot import get_session_snapshot
+        snapshot_result = get_session_snapshot()
+        snapshot_text = snapshot_result.get("snapshot", "")
+    except Exception:
+        return 0  # Snapshot failure must not block compaction
+
+    if not snapshot_text:
+        return 0
+
+    # Return snapshot as hook output for context injection.
+    # PreCompact has no hookSpecificOutput variant in Claude Code's schema,
+    # so we use the top-level systemMessage field instead.
+    result = {
+        "systemMessage": snapshot_text,
+    }
+    json.dump(result, sys.stdout)
+    return 0

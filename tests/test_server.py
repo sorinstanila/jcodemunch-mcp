@@ -21,7 +21,7 @@ async def test_server_lists_all_tools():
     try:
         tools = await list_tools()
 
-        assert len(tools) == 48
+        assert len(tools) == 49
 
         names = {t.name for t in tools}
         expected = {
@@ -29,7 +29,7 @@ async def test_server_lists_all_tools():
             "get_file_tree", "get_file_outline", "get_file_content", "get_symbol_source",
             "search_symbols", "invalidate_cache", "search_text", "get_repo_outline",
             "find_importers", "find_references", "check_references", "search_columns", "get_context_bundle",
-            "get_session_stats", "get_session_context", "plan_turn", "register_edit",
+            "get_session_stats", "get_session_context", "get_session_snapshot", "plan_turn", "register_edit",
             "get_dependency_graph", "get_blast_radius",
             "get_symbol_diff", "get_class_hierarchy", "get_related_symbols", "suggest_queries",
             "get_symbol_importance", "find_dead_code",
@@ -656,8 +656,8 @@ async def test_disabled_tools_filtered_from_schema(monkeypatch):
         assert "index_repo" not in tool_names
         assert "search_columns" not in tool_names
         assert "get_file_tree" in tool_names  # Not disabled
-        # 49 total tools - 2 explicitly disabled = 47
-        assert len(tools) == 47
+        # 50 total tools - 2 explicitly disabled = 48
+        assert len(tools) == 48
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -675,7 +675,7 @@ async def test_disabled_tools_empty_all_tools_present(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        assert len(tools) == 49
+        assert len(tools) == 50
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)

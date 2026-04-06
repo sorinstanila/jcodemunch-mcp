@@ -64,7 +64,7 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     # Diffs & Embeddings
     "get_symbol_diff", "embed_repo",
     # Utilities
-    "get_session_stats", "get_session_context", "plan_turn", "register_edit", "invalidate_cache", "test_summarizer",
+    "get_session_stats", "get_session_context", "get_session_snapshot", "plan_turn", "register_edit", "invalidate_cache", "test_summarizer",
     "audit_agent_config",
 )
 
@@ -74,6 +74,7 @@ _EXCLUDED_FROM_STRICT = frozenset({
     "resolve_repo",
     "get_session_stats",
     "get_session_context",
+    "get_session_snapshot",
     "test_summarizer",
     "index_repo",
     "index_folder",
@@ -888,6 +889,35 @@ def _build_tools_list() -> list[Tool]:
                     },
                 },
             }
+        ),
+        Tool(
+            name="get_session_snapshot",
+            description="Get a compact session snapshot for context continuity. Returns a ~200 token markdown summary of files explored, edits made, searches performed, and dead ends. Designed for injection after context compaction to restore session orientation.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "max_files": {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Maximum focus files to include.",
+                    },
+                    "max_searches": {
+                        "type": "integer",
+                        "default": 5,
+                        "description": "Maximum key searches to include.",
+                    },
+                    "max_edits": {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Maximum edited files to include.",
+                    },
+                    "include_negative_evidence": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Include dead-end searches (negative evidence) in snapshot.",
+                    },
+                },
+            },
         ),
         Tool(
             name="plan_turn",
@@ -2053,6 +2083,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     storage_path=storage_path,
                 )
             )
+        elif name == "get_session_snapshot":
+            from .tools.get_session_snapshot import get_session_snapshot
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_session_snapshot,
+                    max_files=arguments.get("max_files", 10),
+                    max_searches=arguments.get("max_searches", 5),
+                    max_edits=arguments.get("max_edits", 10),
+                    include_negative_evidence=arguments.get("include_negative_evidence", True),
+                    storage_path=storage_path,
+                )
+            )
         elif name == "plan_turn":
             from .tools.plan_turn import plan_turn
             result = await asyncio.to_thread(
@@ -2859,7 +2901,7 @@ def _generate_claude_md_snippet(missing_only: bool = False) -> str:
                                 "get_repo_health", "get_symbol_importance",
                                 "find_dead_code", "get_dead_code_v2"]),
         ("Diffs & Embeddings", ["get_symbol_diff", "embed_repo"]),
-        ("Session-Aware Routing", ["plan_turn", "get_session_context", "register_edit"]),
+        ("Session-Aware Routing", ["plan_turn", "get_session_context", "get_session_snapshot", "register_edit"]),
         ("Utilities", ["get_session_stats", "invalidate_cache", "test_summarizer",
                         "audit_agent_config"]),
     ]
@@ -3598,6 +3640,12 @@ def main(argv: Optional[list[str]] = None):
         help="PostToolUse hook: auto-reindex files after Edit/Write (reads stdin)",
     )
 
+    # --- hook-precompact ---
+    subparsers.add_parser(
+        "hook-precompact",
+        help="PreCompact hook: generate session snapshot before context compaction (reads stdin)",
+    )
+
     # --- watch-claude ---
     wc_parser = subparsers.add_parser(
         "watch-claude",
@@ -3647,7 +3695,7 @@ def main(argv: Optional[list[str]] = None):
     if any(arg in top_level_flags for arg in raw_argv):
         args = parser.parse_args(raw_argv)
     else:
-        known_commands = {"serve", "watch", "hook-event", "hook-pretooluse", "hook-posttooluse", "watch-claude", "config", "index-file", "claude-md", "init"}
+        known_commands = {"serve", "watch", "hook-event", "hook-pretooluse", "hook-posttooluse", "hook-precompact", "watch-claude", "config", "index-file", "claude-md", "init"}
         has_subcommand = any(arg in known_commands for arg in raw_argv if not arg.startswith("-"))
         if not has_subcommand:
             raw_argv = ["serve"] + list(raw_argv)
@@ -3689,6 +3737,10 @@ def main(argv: Optional[list[str]] = None):
     if args.command == "hook-posttooluse":
         from .cli.hooks import run_posttooluse
         sys.exit(run_posttooluse())
+
+    if args.command == "hook-precompact":
+        from .cli.hooks import run_precompact
+        sys.exit(run_precompact())
 
     # Apply config defaults for watcher keys: CLI args > config > env vars.
     # config.load_config() is called inside each subcommand handler, but we need
