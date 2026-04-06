@@ -4,6 +4,11 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.22.3] - 2026-04-06
+
+### Added
+- **`exclude_skip_directories` config** — remove entries from the built-in skip directory list at runtime. Mirrors the existing `exclude_secret_patterns` pattern. Example: set `["proto"]` to index protobuf directories that are skipped by default. Contributed by @DrHayt. Closes #209.
+
 ## [1.22.2] - 2026-04-05
 
 ### Fixed
