@@ -3,14 +3,15 @@
 import asyncio
 import hashlib
 import json
+import subprocess
 import textwrap
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
-from jcodemunch_mcp.hook_event import handle_hook_event, read_manifest
+from jcodemunch_mcp.hook_event import handle_hook_event, read_manifest, _default_manifest_path
 from jcodemunch_mcp.server import main
 from jcodemunch_mcp.watcher import (
     _local_repo_id,
@@ -24,59 +25,213 @@ from jcodemunch_mcp.watcher import (
 # ---------------------------------------------------------------------------
 
 
+def _mock_git_success():
+    """Return a patch that makes git worktree add/remove succeed."""
+    result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    return patch("jcodemunch_mcp.hook_event.subprocess.run", return_value=result)
+
+
 class TestHookEvent:
-    def test_create_appends_to_manifest(self, tmp_path):
+    def test_create_runs_git_worktree_add(self, tmp_path):
+        """hook-event create should invoke git worktree add."""
         manifest = tmp_path / "manifest.jsonl"
-        payload = json.dumps({"worktreePath": "/tmp/my-wt"})
-        with patch("sys.stdin", StringIO(payload)):
+        payload = json.dumps({
+            "cwd": str(tmp_path),
+            "name": "test-wt",
+            "hook_event_name": "WorktreeCreate",
+        })
+        mock_run = MagicMock(return_value=subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr="",
+        ))
+        with (
+            patch("sys.stdin", StringIO(payload)),
+            patch("jcodemunch_mcp.hook_event.subprocess.run", mock_run),
+            patch("jcodemunch_mcp.hook_event._get_worktree_base", return_value=""),
+        ):
             handle_hook_event("create", manifest_path=manifest)
+
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert args[0] == "git"
+        assert "worktree" in args
+        assert "add" in args
+        assert "-b" in args
+        # Branch name should include the worktree name
+        branch_idx = args.index("-b") + 1
+        assert "test-wt" in args[branch_idx]
+
+    def test_create_appends_to_manifest(self, tmp_path):
+        """hook-event create should record the event to the manifest."""
+        manifest = tmp_path / "manifest.jsonl"
+        payload = json.dumps({
+            "cwd": str(tmp_path),
+            "name": "test-wt",
+            "hook_event_name": "WorktreeCreate",
+        })
+        with (
+            patch("sys.stdin", StringIO(payload)),
+            _mock_git_success(),
+            patch("jcodemunch_mcp.hook_event._get_worktree_base", return_value=""),
+        ):
+            handle_hook_event("create", manifest_path=manifest)
+
         lines = manifest.read_text().strip().splitlines()
         assert len(lines) == 1
         entry = json.loads(lines[0])
         assert entry["event"] == "create"
-        assert entry["path"] == str(Path("/tmp/my-wt").resolve())
+        assert "test-wt" in entry["path"]
         assert "ts" in entry
 
-    def test_remove_appends_to_manifest(self, tmp_path):
+    def test_create_prints_path_to_stdout(self, tmp_path, capsys):
+        """hook-event create must print the resolved path to stdout for Claude Code."""
         manifest = tmp_path / "manifest.jsonl"
-        payload = json.dumps({"worktreePath": "/tmp/my-wt"})
-        with patch("sys.stdin", StringIO(payload)):
+        payload = json.dumps({
+            "cwd": str(tmp_path),
+            "name": "my-wt",
+            "hook_event_name": "WorktreeCreate",
+        })
+        with (
+            patch("sys.stdin", StringIO(payload)),
+            _mock_git_success(),
+            patch("jcodemunch_mcp.hook_event._get_worktree_base", return_value=""),
+        ):
             handle_hook_event("create", manifest_path=manifest)
-        with patch("sys.stdin", StringIO(payload)):
+
+        captured = capsys.readouterr()
+        assert "my-wt" in captured.out.strip()
+
+    def test_create_uses_config_base_path(self, tmp_path):
+        """worktree_base_path config overrides the default location."""
+        manifest = tmp_path / "manifest.jsonl"
+        custom_base = str(tmp_path / "custom-worktrees")
+        payload = json.dumps({
+            "cwd": str(tmp_path),
+            "name": "custom-wt",
+            "hook_event_name": "WorktreeCreate",
+        })
+        with (
+            patch("sys.stdin", StringIO(payload)),
+            _mock_git_success(),
+            patch("jcodemunch_mcp.hook_event._get_worktree_base", return_value=custom_base),
+        ):
+            handle_hook_event("create", manifest_path=manifest)
+
+        entry = json.loads(manifest.read_text().strip())
+        assert custom_base in entry["path"]
+        assert "custom-wt" in entry["path"]
+
+    def test_create_default_path_is_claude_convention(self, tmp_path):
+        """Without config, worktree path follows {cwd}/.claude/worktrees/{name}."""
+        manifest = tmp_path / "manifest.jsonl"
+        payload = json.dumps({
+            "cwd": str(tmp_path),
+            "name": "default-wt",
+            "hook_event_name": "WorktreeCreate",
+        })
+        with (
+            patch("sys.stdin", StringIO(payload)),
+            _mock_git_success(),
+            patch("jcodemunch_mcp.hook_event._get_worktree_base", return_value=""),
+        ):
+            handle_hook_event("create", manifest_path=manifest)
+
+        entry = json.loads(manifest.read_text().strip())
+        expected = str(Path(tmp_path / ".claude" / "worktrees" / "default-wt").resolve())
+        assert entry["path"] == expected
+
+    def test_remove_runs_git_worktree_remove(self, tmp_path):
+        """hook-event remove should invoke git worktree remove."""
+        manifest = tmp_path / "manifest.jsonl"
+        payload = json.dumps({
+            "cwd": str(tmp_path),
+            "name": "old-wt",
+            "hook_event_name": "WorktreeRemove",
+        })
+        mock_run = MagicMock(return_value=subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr="",
+        ))
+        with (
+            patch("sys.stdin", StringIO(payload)),
+            patch("jcodemunch_mcp.hook_event.subprocess.run", mock_run),
+            patch("jcodemunch_mcp.hook_event._get_worktree_base", return_value=""),
+        ):
             handle_hook_event("remove", manifest_path=manifest)
-        lines = manifest.read_text().strip().splitlines()
-        assert len(lines) == 2
-        assert json.loads(lines[1])["event"] == "remove"
+
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert args[0] == "git"
+        assert "worktree" in args
+        assert "remove" in args
+
+    def test_remove_nonfatal_on_git_failure(self, tmp_path):
+        """git worktree remove failure should not crash."""
+        manifest = tmp_path / "manifest.jsonl"
+        payload = json.dumps({
+            "cwd": str(tmp_path),
+            "name": "gone-wt",
+            "hook_event_name": "WorktreeRemove",
+        })
+        fail_result = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="fatal: not a worktree",
+        )
+        with (
+            patch("sys.stdin", StringIO(payload)),
+            patch("jcodemunch_mcp.hook_event.subprocess.run", return_value=fail_result),
+            patch("jcodemunch_mcp.hook_event._get_worktree_base", return_value=""),
+        ):
+            # Should not raise
+            handle_hook_event("remove", manifest_path=manifest)
+
+        # Still records the remove event
+        entry = json.loads(manifest.read_text().strip())
+        assert entry["event"] == "remove"
+
+    def test_create_fails_on_git_error(self, tmp_path):
+        """git worktree add failure should exit with error."""
+        manifest = tmp_path / "manifest.jsonl"
+        payload = json.dumps({
+            "cwd": str(tmp_path),
+            "name": "bad-wt",
+            "hook_event_name": "WorktreeCreate",
+        })
+        fail_result = subprocess.CompletedProcess(
+            args=[], returncode=128, stdout="", stderr="fatal: not a git repository",
+        )
+        with (
+            patch("sys.stdin", StringIO(payload)),
+            patch("jcodemunch_mcp.hook_event.subprocess.run", return_value=fail_result),
+            patch("jcodemunch_mcp.hook_event._get_worktree_base", return_value=""),
+        ):
+            with pytest.raises(SystemExit):
+                handle_hook_event("create", manifest_path=manifest)
+
+    def test_legacy_worktree_path_field(self, tmp_path):
+        """Legacy worktreePath field still works (backwards compat)."""
+        manifest = tmp_path / "manifest.jsonl"
+        payload = json.dumps({"worktreePath": "/tmp/legacy-wt"})
+        with (
+            patch("sys.stdin", StringIO(payload)),
+            _mock_git_success(),
+        ):
+            handle_hook_event("create", manifest_path=manifest)
+
+        entry = json.loads(manifest.read_text().strip())
+        assert entry["path"] == str(Path("/tmp/legacy-wt").resolve())
 
     def test_creates_manifest_if_missing(self, tmp_path):
         manifest = tmp_path / "subdir" / "manifest.jsonl"
-        payload = json.dumps({"worktreePath": "/tmp/wt"})
-        with patch("sys.stdin", StringIO(payload)):
-            handle_hook_event("create", manifest_path=manifest)
-        assert manifest.is_file()
-
-    def test_reads_worktree_path_snake_case(self, tmp_path):
-        """Also accept worktree_path (snake_case) for robustness."""
-        manifest = tmp_path / "manifest.jsonl"
-        payload = json.dumps({"worktree_path": "/tmp/wt2"})
-        with patch("sys.stdin", StringIO(payload)):
-            handle_hook_event("create", manifest_path=manifest)
-        entry = json.loads(manifest.read_text().strip())
-        assert entry["path"] == str(Path("/tmp/wt2").resolve())
-
-    def test_derives_path_from_cwd_and_name(self, tmp_path):
-        """Claude Code sends {cwd, name} — derive worktree path from them."""
-        manifest = tmp_path / "manifest.jsonl"
         payload = json.dumps({
-            "cwd": "/projects/myrepo",
-            "name": "moonlit-exploring-journal",
+            "cwd": str(tmp_path),
+            "name": "new-wt",
             "hook_event_name": "WorktreeCreate",
         })
-        with patch("sys.stdin", StringIO(payload)):
+        with (
+            patch("sys.stdin", StringIO(payload)),
+            _mock_git_success(),
+            patch("jcodemunch_mcp.hook_event._get_worktree_base", return_value=""),
+        ):
             handle_hook_event("create", manifest_path=manifest)
-        entry = json.loads(manifest.read_text().strip())
-        expected = str(Path("/projects/myrepo/.claude/worktrees/moonlit-exploring-journal").resolve())
-        assert entry["path"] == expected
+        assert manifest.is_file()
 
     def test_exits_on_missing_path(self, tmp_path):
         manifest = tmp_path / "manifest.jsonl"
@@ -84,6 +239,49 @@ class TestHookEvent:
         with patch("sys.stdin", StringIO(payload)):
             with pytest.raises(SystemExit):
                 handle_hook_event("create", manifest_path=manifest)
+
+
+# ---------------------------------------------------------------------------
+# Manifest path migration tests
+# ---------------------------------------------------------------------------
+
+
+class TestManifestMigration:
+    def test_migrates_legacy_manifest(self, tmp_path, monkeypatch):
+        """Legacy manifest in ~/.claude/ should be moved to new location."""
+        from jcodemunch_mcp import hook_event
+
+        legacy = tmp_path / "legacy" / "jcodemunch-worktrees.jsonl"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text('{"event":"create","path":"/a"}\n')
+
+        new_path = tmp_path / "new" / "jcodemunch-worktrees.jsonl"
+
+        monkeypatch.setattr(hook_event, "_LEGACY_MANIFEST_PATH", legacy)
+        hook_event._migrate_manifest(new_path)
+
+        assert new_path.is_file()
+        assert not legacy.is_file()
+        assert '"/a"' in new_path.read_text()
+
+    def test_no_migration_if_new_exists(self, tmp_path, monkeypatch):
+        """Don't overwrite existing new manifest with legacy one."""
+        from jcodemunch_mcp import hook_event
+
+        legacy = tmp_path / "legacy" / "jcodemunch-worktrees.jsonl"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text('{"event":"create","path":"/old"}\n')
+
+        new_path = tmp_path / "new" / "jcodemunch-worktrees.jsonl"
+        new_path.parent.mkdir(parents=True)
+        new_path.write_text('{"event":"create","path":"/new"}\n')
+
+        monkeypatch.setattr(hook_event, "_LEGACY_MANIFEST_PATH", legacy)
+        hook_event._migrate_manifest(new_path)
+
+        # New file unchanged, legacy untouched
+        assert '"/new"' in new_path.read_text()
+        assert legacy.is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +460,7 @@ class TestWatchClaudeIntegration:
 
         with (
             patch("jcodemunch_mcp.watcher._watch_single", side_effect=fake_watch_single),
-            patch("jcodemunch_mcp.watcher.DEFAULT_MANIFEST_PATH", manifest),
+            patch("jcodemunch_mcp.watcher._default_manifest_path", return_value=manifest),
         ):
             task = asyncio.create_task(
                 watch_claude_worktrees(use_ai_summaries=False)
@@ -294,7 +492,7 @@ class TestWatchClaudeIntegration:
 
         with (
             patch("jcodemunch_mcp.watcher._watch_single", side_effect=fake_watch_single),
-            patch("jcodemunch_mcp.watcher.DEFAULT_MANIFEST_PATH", manifest),
+            patch("jcodemunch_mcp.watcher._default_manifest_path", return_value=manifest),
         ):
             task = asyncio.create_task(
                 watch_claude_worktrees(use_ai_summaries=False)
@@ -337,7 +535,7 @@ class TestWatchClaudeIntegration:
         with (
             patch("jcodemunch_mcp.watcher._watch_single", side_effect=fake_watch_single),
             patch("jcodemunch_mcp.watcher.parse_git_worktrees", side_effect=fake_parse),
-            patch("jcodemunch_mcp.watcher.DEFAULT_MANIFEST_PATH", manifest),
+            patch("jcodemunch_mcp.watcher._default_manifest_path", return_value=manifest),
         ):
             task = asyncio.create_task(
                 watch_claude_worktrees(
@@ -388,7 +586,7 @@ class TestWatchClaudeIntegration:
             patch("jcodemunch_mcp.watcher._watch_single", side_effect=fake_watch_single),
             patch("jcodemunch_mcp.watcher.parse_git_worktrees", side_effect=fake_parse),
             patch("jcodemunch_mcp.watcher.invalidate_cache", side_effect=fake_invalidate),
-            patch("jcodemunch_mcp.watcher.DEFAULT_MANIFEST_PATH", manifest),
+            patch("jcodemunch_mcp.watcher._default_manifest_path", return_value=manifest),
         ):
             task = asyncio.create_task(
                 watch_claude_worktrees(
