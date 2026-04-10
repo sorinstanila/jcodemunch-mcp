@@ -63,6 +63,7 @@ src/jcodemunch_mcp/
 | `watch <paths>` | File watcher — auto-reindex on change |
 | `watch-claude` | Auto-discover and watch Claude Code worktrees |
 | `hook-event create\|remove` | Record a worktree lifecycle event (called by Claude Code hooks) |
+| `index [target]` | Index a local folder (default: `.`) or GitHub repo (`owner/repo`). One command, no init required |
 | `index-file <path>` | Re-index a single file within an existing indexed folder (used by PostToolUse hooks) |
 | `config` | Print effective configuration grouped by concern |
 | `config --check` | Also validate prerequisites (storage writable, AI pkg installed, HTTP pkgs present) |

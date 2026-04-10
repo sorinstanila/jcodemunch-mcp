@@ -2,6 +2,11 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [2.1.0] — 2026-04-10
+
+### Added
+- **`jcodemunch-mcp index` CLI command** ([#230](https://github.com/jgravelle/jcodemunch-mcp/issues/230)): Index a local folder or GitHub repo directly from the terminal. Defaults to the current directory when no target is given — no `init` required. Supports `--no-ai-summaries`, `--follow-symlinks`, and `--extra-ignore` flags
+
 ## [2.0.0] — 2026-04-10
 
 ### Added

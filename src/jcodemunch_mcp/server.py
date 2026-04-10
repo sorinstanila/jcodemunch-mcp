@@ -3809,6 +3809,35 @@ def main(argv: Optional[list[str]] = None):
     )
 
     # --- index-file ---
+    # --- index (full folder/repo index) ---
+    index_parser = subparsers.add_parser(
+        "index",
+        help="Index a local folder or GitHub repo (default: current directory)",
+    )
+    index_parser.add_argument(
+        "target",
+        nargs="?",
+        default=".",
+        help="Local path or owner/repo (default: current directory)",
+    )
+    index_parser.add_argument(
+        "--no-ai-summaries",
+        action="store_true",
+        help="Disable AI-generated summaries",
+    )
+    index_parser.add_argument(
+        "--follow-symlinks",
+        action="store_true",
+        help="Include symlinked files in indexing",
+    )
+    index_parser.add_argument(
+        "--extra-ignore",
+        nargs="*",
+        help="Additional gitignore-style patterns to exclude",
+    )
+    _add_common_args(index_parser)
+
+    # --- index-file ---
     index_file_parser = subparsers.add_parser(
         "index-file",
         help="Re-index a single file within an existing indexed folder",
@@ -4017,7 +4046,7 @@ def main(argv: Optional[list[str]] = None):
     if any(arg in top_level_flags for arg in raw_argv):
         args = parser.parse_args(raw_argv)
     else:
-        known_commands = {"serve", "watch", "hook-event", "hook-pretooluse", "hook-posttooluse", "hook-precompact", "hook-taskcomplete", "hook-subagent-start", "watch-claude", "config", "index-file", "claude-md", "init", "install-pack", "download-model"}
+        known_commands = {"serve", "watch", "hook-event", "hook-pretooluse", "hook-posttooluse", "hook-precompact", "hook-taskcomplete", "hook-subagent-start", "watch-claude", "config", "index", "index-file", "claude-md", "init", "install-pack", "download-model"}
         has_subcommand = any(arg in known_commands for arg in raw_argv if not arg.startswith("-"))
         if not has_subcommand:
             raw_argv = ["serve"] + list(raw_argv)
@@ -4161,6 +4190,31 @@ def main(argv: Optional[list[str]] = None):
                 follow_symlinks=args.follow_symlinks,
             )
         )
+    elif args.command == "index":
+        import json as _json
+        t = args.target
+        use_ai = not args.no_ai_summaries and _default_use_ai_summaries()
+        # Heuristic: "owner/repo" is a GitHub repo; anything else is a local path
+        is_local = "/" not in t or t.startswith("/") or t.startswith(".") or (len(t) > 1 and t[1] == ":")
+        if is_local:
+            from .tools.index_folder import index_folder as _index_folder
+            result = _index_folder(
+                path=t,
+                use_ai_summaries=use_ai,
+                storage_path=os.environ.get("CODE_INDEX_PATH"),
+                extra_ignore_patterns=args.extra_ignore,
+                follow_symlinks=args.follow_symlinks,
+            )
+        else:
+            from .tools.index_repo import index_repo as _index_repo
+            result = asyncio.run(_index_repo(
+                repo=t,
+                use_ai_summaries=use_ai,
+                storage_path=os.environ.get("CODE_INDEX_PATH"),
+            ))
+        print(_json.dumps(result, indent=2))
+        if not result.get("success"):
+            sys.exit(1)
     elif args.command == "index-file":
         from .tools.index_file import index_file as _index_file
         import json as _json
