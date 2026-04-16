@@ -58,7 +58,8 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     "get_call_hierarchy",
     # Impact & Safety
     "get_blast_radius", "check_rename_safe", "get_impact_preview",
-    "get_changed_symbols", "plan_refactoring",
+    "get_changed_symbols", "plan_refactoring", "get_symbol_provenance",
+    "get_pr_risk_profile",
     # Architecture
     "get_dependency_cycles", "get_coupling_metrics", "get_layer_violations",
     "get_extraction_candidates", "get_cross_repo_map", "get_tectonic_map", "get_signal_chains",
@@ -102,6 +103,7 @@ _TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset({
     # Impact & Safety
     "get_blast_radius", "check_rename_safe",
     "get_impact_preview", "get_changed_symbols", "get_symbol_diff",
+    "get_symbol_provenance", "get_pr_risk_profile",
     # Quality & Metrics
     "get_symbol_complexity", "get_churn_rate", "get_hotspots",
     "get_symbol_importance", "find_dead_code", "get_dead_code_v2",
@@ -1292,6 +1294,72 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
+            name="get_symbol_provenance",
+            description=(
+                "Trace the complete authorship lineage and evolution narrative of a symbol "
+                "through git history. Returns every commit that touched the symbol (or its file), "
+                "classified into semantic categories (creation, bugfix, refactor, feature, perf, "
+                "rename, revert, etc.) with extracted commit intent. Includes a human-readable "
+                "narrative summarising who created it, why, how it evolved, and how volatile it is. "
+                "Use before refactoring unfamiliar code to understand the 'why' behind it. "
+                "Requires a locally indexed repo (index_folder)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository identifier (owner/repo or just repo name)",
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "Symbol name or full ID as returned by search_symbols.",
+                    },
+                    "max_commits": {
+                        "type": "integer",
+                        "description": "Maximum commits to analyse (default 25, max 100).",
+                        "default": 25,
+                    },
+                },
+                "required": ["repo", "symbol"],
+            },
+        ),
+        Tool(
+            name="get_pr_risk_profile",
+            description=(
+                "Produce a unified risk assessment for all changes between two git refs (branch, PR, "
+                "or SHA range). Fuses five signals — blast radius, complexity, churn, test gaps, "
+                "and change volume — into a single composite risk_score (0.0–1.0) with actionable "
+                "recommendations. Returns the top-5 riskiest changed symbols, untested symbols, "
+                "and per-signal breakdowns. Designed for CI gating and code review workflows. "
+                "Requires a locally indexed repo (index_folder)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository identifier (owner/repo or just repo name)",
+                    },
+                    "base_ref": {
+                        "type": "string",
+                        "description": "Base SHA/ref to compare from. Defaults to the SHA stored at index time.",
+                    },
+                    "head_ref": {
+                        "type": "string",
+                        "description": "Head SHA/ref to compare to (default 'HEAD').",
+                        "default": "HEAD",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Churn look-back window in days (default 90).",
+                        "default": 90,
+                    },
+                },
+                "required": ["repo"],
+            },
+        ),
+        Tool(
             name="get_dependency_cycles",
             description=(
                 "Detect circular import chains in a repository. "
@@ -2113,13 +2181,18 @@ _ASSESS_PROMPT_TEXT = """\
 
 Goal: Understand the blast radius of a change before merging.
 
+**Quick path** (one call): **get_pr_risk_profile** → unified risk score fusing blast radius, \
+complexity, churn, test gaps, and change volume. Includes actionable recommendations.
+
+**Deep path** (manual drill-down):
 1. **get_changed_symbols** → map the git diff to added/removed/modified/renamed symbols.
 2. **get_blast_radius** on each changed file → depth-scored transitive impact + `has_test_reach` per file.
 3. **get_impact_preview** on key changed symbols → "what breaks?" analysis.
-4. **check_rename_safe** if any symbols were renamed → verify no broken refs.
-5. **get_untested_symbols** on affected files → flag unreached symbols in the blast radius.
-6. **get_coupling_metrics** on changed files → check if the change increases coupling.
-7. **get_dependency_cycles** → check if the change introduces new cycles.
+4. **get_symbol_provenance** on unfamiliar symbols → understand why the code exists before changing it.
+5. **check_rename_safe** if any symbols were renamed → verify no broken refs.
+6. **get_untested_symbols** on affected files → flag unreached symbols in the blast radius.
+7. **get_coupling_metrics** on changed files → check if the change increases coupling.
+8. **get_dependency_cycles** → check if the change introduces new cycles.
 """
 
 _TRIAGE_PROMPT_TEXT = """\
@@ -2730,6 +2803,29 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     storage_path=storage_path,
                 )
             )
+        elif name == "get_symbol_provenance":
+            from .tools.get_symbol_provenance import get_symbol_provenance
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_symbol_provenance,
+                    repo=arguments["repo"],
+                    symbol=arguments["symbol"],
+                    max_commits=arguments.get("max_commits", 25),
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "get_pr_risk_profile":
+            from .tools.get_pr_risk_profile import get_pr_risk_profile
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_pr_risk_profile,
+                    repo=arguments["repo"],
+                    base_ref=arguments.get("base_ref"),
+                    head_ref=arguments.get("head_ref", "HEAD"),
+                    days=arguments.get("days", 90),
+                    storage_path=storage_path,
+                )
+            )
         elif name == "get_dependency_cycles":
             from .tools.get_dependency_cycles import get_dependency_cycles
             result = await asyncio.to_thread(
@@ -3173,6 +3269,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         # Per-call pulse for downstream consumers (dashboards, monitors)
         _saved = result.get("_meta", {}).get("tokens_saved", 0) if isinstance(result, dict) else 0
         _write_pulse(name, tokens_saved=_saved, base_path=storage_path)
+
+        # Response-level secret redaction — scrub leaked credentials
+        # before they reach the LLM context window
+        if isinstance(result, dict):
+            try:
+                from .redact import is_redaction_enabled, redact_dict
+                if is_redaction_enabled():
+                    result, _redact_count = redact_dict(result)
+                    if _redact_count > 0:
+                        meta = result.setdefault("_meta", {})
+                        meta["secrets_redacted"] = _redact_count
+            except Exception:
+                logger.debug("Secret redaction failed", exc_info=True)
 
         return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
@@ -3624,7 +3733,8 @@ def _generate_claude_md_snippet(missing_only: bool = False) -> str:
                            "get_related_symbols", "get_call_hierarchy"]),
         ("Impact & Safety", ["get_blast_radius", "check_rename_safe",
                               "get_impact_preview", "get_changed_symbols",
-                              "plan_refactoring"]),
+                              "plan_refactoring", "get_symbol_provenance",
+                              "get_pr_risk_profile"]),
         ("Architecture", ["get_dependency_cycles", "get_coupling_metrics",
                           "get_layer_violations", "get_extraction_candidates",
                           "get_cross_repo_map", "get_tectonic_map",

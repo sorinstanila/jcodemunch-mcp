@@ -1,7 +1,7 @@
 # jcodemunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.50.1 (published to PyPI)
+- **Version:** 1.51.0 (published to PyPI)
 - **INDEX_VERSION:** 9
 - **Tests:** 3248 passed, 9 skipped
 - **Python:** >=3.10
@@ -13,6 +13,7 @@ src/jcodemunch_mcp/
   watcher.py           # WatcherManager class (dynamic folder watching); watch_folders() wrapper
   progress.py          # MCP progress notifications; ProgressReporter (thread-safe, monotonic), make_progress_notify() bridge
   security.py          # Path validation, skip patterns, file caps
+  redact.py            # Response-level secret redaction; regex patterns for AWS/GCP/Azure/JWT/GitHub/Slack/PEM/API keys/private IPs; redact_dict() post-processor
   config.py            # JSONC config: global + per-project layering, env var fallback, language/tool gating
   agent_selector.py    # Complexity scoring + model routing (off/manual/auto); default provider batting orders
   cli/
@@ -57,6 +58,8 @@ src/jcodemunch_mcp/
     plan_refactoring.py   # plan_refactoring: edit-ready plans for rename/move/extract/signature refactorings
     get_symbol_complexity.py  # get_symbol_complexity: cyclomatic/nesting/param_count for a symbol
     get_churn_rate.py         # get_churn_rate: git commit count for file or symbol over N days
+    get_symbol_provenance.py  # get_symbol_provenance: full git archaeology per symbol — authorship lineage, semantic commit classification, evolution narrative
+    get_pr_risk_profile.py    # get_pr_risk_profile: unified PR/branch risk assessment — fuses blast radius + complexity + churn + test gaps + volume into composite score
     get_hotspots.py           # get_hotspots: top-N high-risk symbols by complexity x churn
     get_tectonic_map.py       # get_tectonic_map: logical module topology via 3-signal fusion (structural+behavioral+temporal) + label propagation
     get_signal_chains.py      # get_signal_chains: entry-point-to-leaf pathway discovery; traces how HTTP/CLI/task/event signals propagate through the call graph; discovery + lookup modes
@@ -121,6 +124,7 @@ Tree-sitter grammar lacks clean named fields for these — custom regex extracto
 | `JCODEMUNCH_RATE_LIMIT` | 0 | Max requests/minute per client IP in HTTP transport (0 = disabled) |
 | `JCODEMUNCH_REDACT_SOURCE_ROOT` | 0 | Set 1 to replace source_root with display_name in responses |
 | `JCODEMUNCH_SHARE_SAVINGS` | 1 | Set 0 to disable anonymous token savings telemetry |
+| `JCODEMUNCH_REDACT_RESPONSE_SECRETS` | 1 | Set 0 to disable response-level secret redaction (AWS/GCP/Azure/JWT/etc.) |
 | `JCODEMUNCH_STATS_FILE_INTERVAL` | 3 | Calls between session_stats.json writes; 0 = disable |
 | `ANTHROPIC_API_KEY` | — | Enables Claude Haiku summaries (`pip install jcodemunch-mcp[anthropic]`) |
 | `GOOGLE_API_KEY` | — | Enables Gemini Flash summaries (`pip install jcodemunch-mcp[gemini]`) |

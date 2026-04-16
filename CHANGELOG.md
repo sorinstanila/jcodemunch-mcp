@@ -2,6 +2,14 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.51.0] — 2026-04-16
+
+### Added
+- **Symbol Provenance** — new `get_symbol_provenance` tool traces the complete authorship lineage and evolution narrative of any symbol through git history. Uses `git log -L` line-range tracking (with file-level fallback) to find every commit that touched a symbol, classifies each into semantic categories (creation, bugfix, refactor, feature, perf, rename, revert, etc.), extracts motivating intent from commit bodies, and generates a human-readable narrative summarising who created it, why, and how it evolved. Returns ranked author list, evolution summary with lifespan/frequency metrics, and dominant change pattern. Use before refactoring unfamiliar code to understand the "why" behind it.
+- **PR Risk Profile** — new `get_pr_risk_profile` tool produces a unified risk assessment for all changes between two git refs. Fuses five orthogonal signals — blast radius (30%), complexity (25%), test gaps (20%), churn (15%), and change volume (10%) — into a single composite `risk_score` (0.0–1.0) with `risk_level` (low/medium/high/critical). Returns per-signal breakdowns, top-5 riskiest changed symbols, untested symbol list, and actionable recommendations. Designed for CI gating and the `/review` workflow. One call replaces manual orchestration of `get_changed_symbols` + `get_blast_radius` + `get_hotspots` + `get_untested_symbols`.
+- **Response Secret Redaction** — all tool responses are now scanned for leaked credentials before reaching the LLM context window. Detects AWS access keys (AKIA...), AWS secret keys, GCP service account emails, Azure storage/client keys, JWT tokens, GitHub PATs (ghp_/gho_/...), Slack tokens, PEM private key headers, generic API keys (32+ char high-entropy values), and private IPv4 addresses (10.x, 172.16-31.x, 192.168.x). Matched values are replaced with `[REDACTED:<type>]` placeholders. Controlled by `redact_response_secrets` config key (default: true) or `JCODEMUNCH_REDACT_RESPONSE_SECRETS` env var. The `_meta` field reports `secrets_redacted` count when any redactions occur.
+- Updated the **assess** MCP prompt template to recommend `get_pr_risk_profile` as the quick-path and `get_symbol_provenance` for deep-path analysis.
+
 ## [1.50.1] — 2026-04-16
 
 ### Fixed
