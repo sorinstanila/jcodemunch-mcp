@@ -2,6 +2,22 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.62.0] — 2026-04-19
+
+Audit remediation — wire-format and session-state changes. Minor bump
+because the MUNCH generic encoder gains new escape sequences; old
+payloads still decode but new payloads are forward-only.
+
+### Fixed
+- **MUNCH generic encoder escapes newlines in quoted scalars (F1).** `assemble` joins sections with `\n\n` and `split_sections` splits on the same delimiter. Scalars containing a blank line (docstrings, stacktraces, multi-paragraph summaries routed through the generic fallback) truncated mid-record on decode; blocks after the truncation were misclassified as tables. `\\`, `\n`, `\r` are now escaped on write and reversed on read. Old un-escaped payloads still decode cleanly — the decoder only consumes known escape sequences.
+- **MUNCH schema embed escapes separator characters (F11).** The `__tables` embed used `:` and `|` as separators with no escape for keys or column names containing those characters. Keys like `"stats:by_file"` and columns like `"col|weird"` are now percent-encoded (`%3A`, `%7C`, `%2C`, `%25`) on write and reversed on read.
+- **Nested-table decode no longer silently drops data (F5).** When a parent key carried both a flattened table and a heterogeneous sibling that fell back to `__json.<parent>`, the decoder restored the parent as the JSON scalar first and the nested-table pass then silently skipped the assignment behind an `isinstance(..., dict)` guard. The scalar is now wrapped in `{"_scalar": ...}` so the nested table survives.
+- **Per-session tier tracking switches to WeakKeyDictionary (F2 + F3).** `id()` can be reused after GC, so a freed session's tier override could be inherited by a newly-allocated replacement at the same address; separately, the LRU cap of 256 silently reset a live session's tier to config default under session-churn load. Both addressed by keying on a per-session UUID tracked in a WeakKeyDictionary: entries disappear exactly when the session is collected, no cap, no eviction, no id() reuse. Constant `_SESSION_TIER_CAP` removed.
+- **`mermaid_viewer_path` config accepts bare command names (F6).** Configuring a bare command (`"mmd-viewer"`) was rejected by the strict executable-file-on-disk check and never reached `shutil.which`. Bare names (no path separator) now defer to `shutil.which`; absolute and relative paths still go through the strict check so a typo in a configured path isn't silently replaced by something on `PATH`.
+
+### Changed
+- Removed `_SESSION_TIER_CAP` constant and LRU-cap eviction from `server.py`. Test helpers and docs updated accordingly.
+
 ## [1.61.1] — 2026-04-19
 
 Audit remediation — low-risk fixes. No wire-format or session-state
