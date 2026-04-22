@@ -253,6 +253,20 @@ class TestGetRankedContext:
         assert "timing_ms" in meta
         assert "tokens_saved" in meta
 
+    def test_exact_snake_case_query_ranks_matching_symbol_first(self, tmp_path):
+        """Exact snake_case queries should rank the matching method first on BM25 path."""
+        from jcodemunch_mcp.storage.sqlite_store import _cache_clear
+        from tests.conftest_helpers import create_exact_match_index
+
+        repo, storage = create_exact_match_index(tmp_path)
+        _cache_clear()
+
+        result = get_ranked_context(repo, query="build_ui", strategy="bm25", storage_path=storage)
+
+        assert "error" not in result
+        assert result["context_items"]
+        assert result["context_items"][0]["symbol_id"].endswith("UiBuilder.build_ui#method")
+
 
 # ---------------------------------------------------------------------------
 # Diversity-aware budget packing

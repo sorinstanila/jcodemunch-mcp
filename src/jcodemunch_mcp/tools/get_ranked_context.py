@@ -197,7 +197,7 @@ def get_ranked_context(
         if scope and not fnmatch(sym.get("file", ""), scope):
             continue
 
-        bm25 = _bm25_score(sym, query_terms, idf, avgdl)
+        bm25 = _bm25_score(sym, query_terms, idf, avgdl, raw_query=query)
         if bm25 <= 0 and strategy != "centrality":
             continue
         pr_raw = pagerank.get(sym.get("file", ""), 0.0)
@@ -296,12 +296,7 @@ def get_ranked_context(
         pass
 
     negative_evidence = None
-    # For semantic-only mode, BM25 score can legitimately be 0 even with valid
-    # semantic matches — skip the max_bm25 threshold check to avoid false negatives.
-    _check_bm25_threshold = True  # will be overridden below for semantic_only
-    if strategy == "semantic_only":
-        _check_bm25_threshold = False
-    if not context_items or (_check_bm25_threshold and max_bm25 < _ne_threshold):
+    if not context_items or max_bm25 < _ne_threshold:
         verdict = "no_implementation_found" if not context_items else "low_confidence_matches"
         related_existing = [
             f for f in index.source_files

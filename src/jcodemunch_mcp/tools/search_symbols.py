@@ -266,7 +266,7 @@ def _compute_centrality(
     return {f: math.log(1 + c) * _CENTRALITY_WEIGHT for f, c in counts.items()}
 
 
-def _identity_score(sym: dict, query_joined: str) -> float:
+def _identity_score(sym: dict, query_joined: str, raw_query: str = "") -> float:
     """Identity channel: exact or prefix match on symbol name/ID.
 
     Returns a high score for exact matches and a decreasing score for
@@ -279,29 +279,38 @@ def _identity_score(sym: dict, query_joined: str) -> float:
       - ID contains query segment → 20.0
       - No match                  →  0.0
     """
-    if not query_joined:
+    raw_lower = raw_query.lower() if raw_query else ""
+    if not raw_lower and not query_joined:
         return 0.0
     name_lower = sym.get("name", "").lower()
     sym_id_lower = sym.get("id", "").lower()
 
-    # Exact match on name or ID
+    # Raw query preserves snake_case/camelCase for exact matches.
+    if raw_lower and (raw_lower == name_lower or raw_lower == sym_id_lower):
+        return 50.0
+
+    # Tokenized fallback preserves previous semantics for callers that only have terms.
     if query_joined == name_lower or query_joined == sym_id_lower:
         return 50.0
 
     # Prefix match on name (e.g. query "get_sym" matches "get_symbol_source")
-    if name_lower.startswith(query_joined):
+    if query_joined and name_lower.startswith(query_joined):
+        return 30.0
+    if raw_lower and name_lower.startswith(raw_lower):
         return 30.0
 
     # Qualified ID segment match (e.g. query "storage.indexstore" matches
     # "src/storage/index_store.py::IndexStore")
-    if query_joined in sym_id_lower:
+    if query_joined and query_joined in sym_id_lower:
+        return 20.0
+    if raw_lower and raw_lower in sym_id_lower:
         return 20.0
 
     return 0.0
 
 
 def _bm25_score(sym: dict, query_terms: list[str], idf: dict[str, float], avgdl: float,
-                centrality: Optional[dict] = None) -> float:
+                centrality: Optional[dict] = None, raw_query: str = "") -> float:
     """BM25 score for a single symbol.
 
     Uses pre-cached _tf and _dl from _sym_tokens() to avoid rebuilding
@@ -313,7 +322,7 @@ def _bm25_score(sym: dict, query_terms: list[str], idf: dict[str, float], avgdl:
 
     # Identity channel: exact/prefix match on symbol name or ID
     query_joined = " ".join(query_terms)
-    score: float = _identity_score(sym, query_joined)
+    score: float = _identity_score(sym, query_joined, raw_query)
 
     K = _BM25_K1 * (1 - _BM25_B + _BM25_B * dl / max(avgdl, 1.0))
     for term in set(query_terms):
@@ -331,7 +340,7 @@ def _bm25_score(sym: dict, query_terms: list[str], idf: dict[str, float], avgdl:
     return score
 
 
-def _bm25_breakdown(sym: dict, query_terms: list[str], idf: dict[str, float], avgdl: float) -> dict:
+def _bm25_breakdown(sym: dict, query_terms: list[str], idf: dict[str, float], avgdl: float, raw_query: str = "") -> dict:
     """Per-field BM25 contribution breakdown (for debug mode).
 
     Uses cached _dl from _sym_tokens() for K computation but re-tokenizes
@@ -362,7 +371,7 @@ def _bm25_breakdown(sym: dict, query_terms: list[str], idf: dict[str, float], av
                 field_score += idf[term] * (tf * (_BM25_K1 + 1)) / (tf + K)
         out[fname] = round(field_score, 3)
     query_joined = " ".join(query_terms)
-    identity = _identity_score(sym, query_joined)
+    identity = _identity_score(sym, query_joined, raw_query)
     out["identity"] = identity
     if identity >= 50.0:
         out["identity_type"] = "exact"
@@ -719,7 +728,7 @@ def search_symbols(
             if decorator and not any(decorator.lower() in d.lower() for d in (sym.get("decorators") or [])):
                 continue
 
-        score = _bm25_score(sym, query_terms, idf, avgdl, centrality)
+        score = _bm25_score(sym, query_terms, idf, avgdl, centrality, raw_query=query)
         if score <= 0:
             continue
 
@@ -760,7 +769,7 @@ def search_symbols(
             entry["decorators"] = decs
         if debug:
             entry["score"] = round(score, 3)
-            entry["score_breakdown"] = _bm25_breakdown(sym, query_terms, idf, avgdl)
+            entry["score_breakdown"] = _bm25_breakdown(sym, query_terms, idf, avgdl, raw_query=query)
 
         # Bounded heap: O(N log K) instead of O(N log N)
         if len(heap) < effective_limit:
@@ -1064,7 +1073,7 @@ def _search_symbols_semantic(
             if decorator and not any(decorator.lower() in d.lower() for d in (sym.get("decorators") or [])):
                 continue
 
-        bm25 = 0.0 if semantic_only else _bm25_score(sym, query_terms, idf, avgdl, centrality)
+        bm25 = 0.0 if semantic_only else _bm25_score(sym, query_terms, idf, avgdl, centrality, raw_query=query)
         if bm25 > max_bm25:
             max_bm25 = bm25
 

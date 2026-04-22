@@ -24,6 +24,36 @@ def create_mini_index(tmp_path: Path, filename: str = "test_module.py") -> tuple
     return result["repo"], sp
 
 
+def create_exact_match_index(tmp_path: Path, filename: str = "ui_builder.py") -> tuple[str, str]:
+    """Create an indexed repo with exact snake_case/camelCase method names.
+
+    The methods intentionally contain call references so the SQLite loader must
+    reconstruct v8 array-style ``data`` rows before search tools apply the
+    ``language='python'`` filter.
+    """
+    from jcodemunch_mcp.tools.index_folder import index_folder
+
+    _write(tmp_path / filename, (
+        "class UiBuilder:\n"
+        "    def helper(self):\n"
+        "        return 1\n\n"
+        "    def _build_left_pane_cache(self):\n"
+        "        self.helper()\n"
+        "        return {}\n\n"
+        "    def renderRow(self):\n"
+        "        self.helper()\n"
+        "        return 1\n\n"
+        "    def set_ui(self):\n"
+        "        return None\n\n"
+        "    def build_ui(self):\n"
+        "        self.helper()\n"
+        "        return self.set_ui()\n"
+    ))
+    sp = str(tmp_path / "idx")
+    result = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=sp)
+    return result["repo"], sp
+
+
 def get_index(repo: str, storage_path: str):
     """Load the CodeIndex for a test repo."""
     from jcodemunch_mcp.storage.sqlite_store import SQLiteIndexStore

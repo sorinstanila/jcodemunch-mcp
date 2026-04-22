@@ -208,3 +208,28 @@ def test_search_symbols_cache_key_distinguishes_auto_from_explicit_compact(tmp_p
     ids_1 = [e["id"] for e in r1["results"]]
     ids_2 = [e["id"] for e in r2["results"]]
     assert ids_1 == ids_2
+
+
+def test_search_symbols_exact_snake_case_survives_sqlite_reload_with_language_filter(tmp_path):
+    """Exact snake_case method search should survive v8 SQLite reload + language filtering."""
+    from jcodemunch_mcp.storage.sqlite_store import _cache_clear
+    from tests.conftest_helpers import create_exact_match_index
+
+    repo, storage = create_exact_match_index(tmp_path)
+    _cache_clear()  # force row-based reload instead of pre-warmed in-memory index
+
+    result = search_symbols(
+        repo=repo,
+        query="_build_left_pane_cache",
+        kind="method",
+        language="python",
+        file_pattern="*.py",
+        detail_level="standard",
+        debug=True,
+        storage_path=storage,
+    )
+
+    assert result.get("result_count", 0) > 0
+    first = result["results"][0]
+    assert first["name"] == "_build_left_pane_cache"
+    assert first["score_breakdown"]["identity"] == 50.0

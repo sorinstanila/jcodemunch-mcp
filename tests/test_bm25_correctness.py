@@ -191,6 +191,14 @@ class TestIdentityChannel:
         sym = {"name": "ProcessData", "id": "src/utils.py::ProcessData"}
         assert _identity_score(sym, "processdata") == 50.0
 
+    def test_raw_query_exact_snake_case_match(self):
+        sym = {"name": "build_ui", "id": "src/ui.py::build_ui"}
+        assert _identity_score(sym, "build ui", raw_query="build_ui") == 50.0
+
+    def test_raw_query_exact_camel_case_match(self):
+        sym = {"name": "ProcessData", "id": "src/utils.py::ProcessData"}
+        assert _identity_score(sym, "process data", raw_query="ProcessData") == 50.0
+
     def test_exact_beats_prefix(self):
         """Exact match (50) must score higher than prefix match (30)."""
         sym = {"name": "get_symbol", "id": "src/tools.py::get_symbol"}
@@ -236,3 +244,79 @@ class TestIdentityChannel:
         breakdown = _bm25_breakdown(sym, ["unrelated"], idf, avgdl)
         assert breakdown["identity"] == 0.0
         assert breakdown["identity_type"] == "none"
+
+    def test_breakdown_uses_raw_query_for_snake_case_exact_match(self):
+        sym = {
+            "name": "_build_left_pane_cache",
+            "signature": "_build_left_pane_cache()",
+            "summary": "",
+            "docstring": "",
+            "keywords": [],
+        }
+        _sym_tokens(sym)
+        idf, avgdl, _ = _compute_bm25([sym])
+        breakdown = _bm25_breakdown(sym, ["build", "left", "pane", "cache"], idf, avgdl, raw_query="_build_left_pane_cache")
+        assert breakdown["identity"] == 50.0
+        assert breakdown["identity_type"] == "exact"
+
+
+# ---------------------------------------------------------------------------
+# Identity channel on BM25 path (raw_query regression tests)
+# ---------------------------------------------------------------------------
+
+class TestIdentityChannelBM25Path:
+    """Tests that BM25 path preserves exact snake_case/camelCase matching via raw_query."""
+
+    def _make_sym(self, name: str, summary: str = "") -> dict:
+        return {"name": name, "signature": "", "summary": summary, "docstring": "", "keywords": []}
+
+    def test_bm25_score_exact_snake_case_match(self):
+        """BM25 path should use raw_query for exact snake_case identity match."""
+        from jcodemunch_mcp.tools.search_symbols import _bm25_score, _tokenize
+
+        sym = self._make_sym("_build_left_pane_cache")
+        _sym_tokens(sym)
+        idf, avgdl, _ = _compute_bm25([sym])
+
+        # Tokenize the raw query as the BM25 path would
+        raw_query = "_build_left_pane_cache"
+        query_terms = _tokenize(raw_query)
+        # The bug: _identity_score gets " ".join(query_terms) which loses underscore structure
+        # After fix: _identity_score should also receive raw_query="_build_left_pane_cache"
+        score = _bm25_score(sym, query_terms, idf, avgdl, raw_query=raw_query)
+        # Without raw_query fix, identity score is 0 (no exact match)
+        # With raw_query fix, identity score should be 50 (exact name match)
+        assert score >= 50.0, f"Expected exact identity match (50+), got {score}"
+
+    def test_bm25_score_exact_camel_case_match(self):
+        """BM25 path should use raw_query for exact camelCase identity match."""
+        from jcodemunch_mcp.tools.search_symbols import _bm25_score, _tokenize
+
+        sym = self._make_sym("renderRow")
+        _sym_tokens(sym)
+        idf, avgdl, _ = _compute_bm25([sym])
+
+        raw_query = "renderRow"
+        query_terms = _tokenize(raw_query)
+        score = _bm25_score(sym, query_terms, idf, avgdl, raw_query=raw_query)
+        # After fix: should get exact match bonus
+        assert score >= 50.0, f"Expected exact identity match (50+), got {score}"
+
+    def test_exact_name_beats_partial_in_bm25(self):
+        """Exact name match should score higher than partial match in BM25 path."""
+        from jcodemunch_mcp.tools.search_symbols import _bm25_score, _tokenize
+
+        sym_exact = self._make_sym("build_ui")
+        sym_partial = self._make_sym("set_ui")
+        for sym in [sym_exact, sym_partial]:
+            _sym_tokens(sym)
+        idf, avgdl, _ = _compute_bm25([sym_exact, sym_partial])
+
+        raw_query = "build_ui"
+        query_terms = _tokenize(raw_query)
+        exact_score = _bm25_score(sym_exact, query_terms, idf, avgdl, raw_query=raw_query)
+        partial_score = _bm25_score(sym_partial, query_terms, idf, avgdl, raw_query=raw_query)
+        # After fix: exact match should outrank non-matching
+        assert exact_score > partial_score, (
+            f"Exact 'build_ui' ({exact_score}) should beat 'set_ui' ({partial_score})"
+        )

@@ -1,4 +1,4 @@
-"""Tests for Task 1: call_references data model — Symbol field, INDEX_VERSION 8, SQLite storage."""
+"""Tests for Task 1: call_references data model — Symbol field, INDEX_VERSION 9, SQLite storage."""
 
 import json
 import pytest
@@ -56,10 +56,10 @@ class TestCallReferencesSymbolField:
 
 
 class TestIndexVersionBump:
-    """INDEX_VERSION is bumped to 8."""
+    """INDEX_VERSION is bumped to 9."""
 
-    def test_index_version_is_8(self):
-        """INDEX_VERSION constant must be 8 after this change."""
+    def test_index_version_is_9(self):
+        """INDEX_VERSION constant must be 9 after this change."""
         assert INDEX_VERSION == 9
 
 
@@ -360,6 +360,165 @@ class TestSQLiteCallReferencesRoundTrip:
         d = store._symbol_to_dict(sym)
         assert "call_references" in d
         assert d["call_references"] == ["bar"]
+
+    def test_v8_row_preserves_metadata(self, tmp_path):
+        """v8 row (data as JSON array) preserves qualified_name, language, decorators, keywords, content_hash, ecosystem_context from row columns."""
+        from jcodemunch_mcp.storage.sqlite_store import SQLiteIndexStore
+
+        store = SQLiteIndexStore(base_path=str(tmp_path / "store"))
+        db_path = tmp_path / "test.db"
+        conn = store._connect(db_path)
+
+        # Insert a raw v8 row: data column is a JSON array (call_references)
+        conn.execute(
+            "INSERT INTO symbols (id, file, name, kind, signature, summary, docstring, "
+            "line, end_line, byte_offset, byte_length, parent, qualified_name, language, "
+            "decorators, keywords, content_hash, ecosystem_context, data, cyclomatic, "
+            "max_nesting, param_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "src/orders.py::AppToolOrders._build_left_pane_cache#method",
+                "src/orders.py",
+                "_build_left_pane_cache",
+                "method",
+                "def _build_left_pane_cache(self, request)",
+                "Builds the left pane cache.",
+                "",
+                50,
+                75,
+                100,
+                500,
+                "AppToolOrders",
+                "AppToolOrders._build_left_pane_cache",
+                "python",
+                '["@cache", "@logged"]',
+                '["cache", "pane"]',
+                "abc123def456",
+                '{"cache": "redis"}',
+                '["_render_row", "helper"]',  # v8: data is JSON array of call_references
+                None,
+                None,
+                None,
+            ),
+        )
+        conn.commit()
+
+        rows = conn.execute("SELECT * FROM symbols").fetchall()
+        col_names = [description[0] for description in conn.execute("SELECT * FROM symbols").description]
+        for row in rows:
+            row_dict = dict(zip(col_names, row))
+            result = store._row_to_symbol_dict(row_dict)
+            # These fields must come from row columns, NOT from data JSON (which is an array)
+            assert result["qualified_name"] == "AppToolOrders._build_left_pane_cache", f"qualified_name mismatch: {result['qualified_name']}"
+            assert result["language"] == "python", f"language mismatch: {result['language']}"
+            assert result["decorators"] == ["@cache", "@logged"], f"decorators mismatch: {result['decorators']}"
+            assert result["keywords"] == ["cache", "pane"], f"keywords mismatch: {result['keywords']}"
+            assert result["content_hash"] == "abc123def456", f"content_hash mismatch: {result['content_hash']}"
+            assert result["ecosystem_context"] == '{"cache": "redis"}', f"ecosystem_context mismatch: {result['ecosystem_context']}"
+            # call_references must be deserialized from the data array
+            assert result["call_references"] == ["_render_row", "helper"], f"call_references mismatch: {result['call_references']}"
+
+    def test_v8_row_qualified_name_from_row_not_name(self, tmp_path):
+        """When data is a JSON array, qualified_name must come from row['qualified_name'], not row['name']."""
+        from jcodemunch_mcp.storage.sqlite_store import SQLiteIndexStore
+
+        store = SQLiteIndexStore(base_path=str(tmp_path / "store"))
+        db_path = tmp_path / "test.db"
+        conn = store._connect(db_path)
+
+        # Insert a v8 row where name differs from qualified_name
+        conn.execute(
+            "INSERT INTO symbols (id, file, name, kind, signature, summary, docstring, "
+            "line, end_line, byte_offset, byte_length, parent, qualified_name, language, "
+            "decorators, keywords, content_hash, ecosystem_context, data, cyclomatic, "
+            "max_nesting, param_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "src/ui.py::UIContainer.build_pane#method",
+                "src/ui.py",
+                "build_pane",  # short name
+                "method",
+                "def build_pane(self)",
+                "",
+                "",
+                10,
+                20,
+                0,
+                100,
+                "UIContainer",
+                "UIContainer.build_pane",  # fully qualified name
+                "python",
+                "[]",
+                "[]",
+                "",
+                "",
+                '["helper"]',  # v8: call_references in data array
+                None,
+                None,
+                None,
+            ),
+        )
+        conn.commit()
+
+        rows = conn.execute("SELECT * FROM symbols").fetchall()
+        col_names = [description[0] for description in conn.execute("SELECT * FROM symbols").description]
+        for row in rows:
+            row_dict = dict(zip(col_names, row))
+            result = store._row_to_symbol_dict(row_dict)
+            # qualified_name must be the full path, not just "build_pane"
+            assert result["qualified_name"] == "UIContainer.build_pane", f"qualified_name should be 'UIContainer.build_pane', got: {result['qualified_name']}"
+            assert result["name"] == "build_pane"
+            assert result["call_references"] == ["helper"]
+
+    def test_v8_row_logs_invalid_decorators_and_keywords_json(self, tmp_path, caplog):
+        """v8 rows should log warnings when decorators/keywords JSON is corrupted."""
+        from jcodemunch_mcp.storage.sqlite_store import SQLiteIndexStore
+
+        store = SQLiteIndexStore(base_path=str(tmp_path / "store"))
+        db_path = tmp_path / "test.db"
+        conn = store._connect(db_path)
+
+        conn.execute(
+            "INSERT INTO symbols (id, file, name, kind, signature, summary, docstring, "
+            "line, end_line, byte_offset, byte_length, parent, qualified_name, language, "
+            "decorators, keywords, content_hash, ecosystem_context, data, cyclomatic, "
+            "max_nesting, param_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "src/ui.py::UIContainer.build_pane#method",
+                "src/ui.py",
+                "build_pane",
+                "method",
+                "def build_pane(self)",
+                "",
+                "",
+                10,
+                20,
+                0,
+                100,
+                "UIContainer",
+                "UIContainer.build_pane",
+                "python",
+                "[not valid json",
+                "{not valid json",
+                "",
+                "",
+                '["helper"]',
+                None,
+                None,
+                None,
+            ),
+        )
+        conn.commit()
+
+        rows = conn.execute("SELECT * FROM symbols").fetchall()
+        col_names = [description[0] for description in conn.execute("SELECT * FROM symbols").description]
+
+        with caplog.at_level("WARNING"):
+            row_dict = dict(zip(col_names, rows[0]))
+            result = store._row_to_symbol_dict(row_dict)
+
+        assert result["decorators"] == []
+        assert result["keywords"] == []
+        assert "Corrupted decorators JSON for symbol build_pane" in caplog.text
+        assert "Corrupted keywords JSON for symbol build_pane" in caplog.text
 
     def test_v7_index_loads_with_call_references_defaulting_to_empty(self, tmp_path):
         """Old v7 index (no call_references field) loads with call_references=[]."""

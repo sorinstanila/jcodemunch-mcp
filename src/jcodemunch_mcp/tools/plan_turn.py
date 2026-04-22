@@ -95,7 +95,7 @@ def plan_turn(
     hits = 0
 
     for sym in candidates:
-        score = _bm25_score(sym, query_terms, idf, avgdl, centrality)
+        score = _bm25_score(sym, query_terms, idf, avgdl, centrality, raw_query=query)
         if score <= 0:
             continue
         hits += 1

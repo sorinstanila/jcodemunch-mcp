@@ -186,7 +186,7 @@ def build_identity_channel(
     query_lower = query.lower()
     scored: list[tuple[float, str]] = []
     for sym in symbols:
-        s = _identity_score(sym, query_lower)
+        s = _identity_score(sym, query_lower, raw_query=query_lower)
         if s > 0:
             scored.append((s, sym["id"]))
 

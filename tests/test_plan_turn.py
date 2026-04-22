@@ -198,6 +198,20 @@ class TestPlanTurn:
         result = plan_turn(repo=repo, query="zzz_totally_fake_query", storage_path=storage_path)
         assert result["confidence"] in ("none", "low")
 
+    def test_exact_camel_case_query_ranks_matching_symbol_first(self, tmp_path: Path):
+        """Exact camelCase queries should surface the matching method first."""
+        from jcodemunch_mcp.storage.sqlite_store import _cache_clear
+        from jcodemunch_mcp.tools.plan_turn import plan_turn
+        from tests.conftest_helpers import create_exact_match_index
+
+        repo, storage_path = create_exact_match_index(tmp_path)
+        _cache_clear()
+
+        result = plan_turn(repo=repo, query="renderRow", storage_path=storage_path)
+
+        assert result["recommended_symbols"]
+        assert result["recommended_symbols"][0]["name"] == "renderRow"
+
 
 class TestPlanTurnActionField:
     """Tests for action field in plan_turn on low/none confidence."""
